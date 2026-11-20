@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -84,13 +85,18 @@ type providerView struct {
 	CheckedAt time.Time `json:"checked_at"`
 	CheckErr  string    `json:"check_error"`
 	CanImages bool      `json:"can_images"`
+
+	Tests map[string]config.ModelTest `json:"tests"`
 }
 
 func settingsView(s config.Settings) map[string]any {
 	ps := make([]providerView, 0, len(s.Providers))
 	for _, p := range s.Providers {
 		v := providerView{ID: p.ID, Kind: p.Kind, Name: p.Name, BaseURL: p.BaseURL, Models: p.Models,
-			CheckedAt: p.CheckedAt, CheckErr: p.CheckErr, CanImages: providers.CanMakeImages(p.Kind)}
+			CheckedAt: p.CheckedAt, CheckErr: p.CheckErr, CanImages: providers.CanMakeImages(p.Kind), Tests: p.Tests}
+		if v.Tests == nil {
+			v.Tests = map[string]config.ModelTest{}
+		}
 		if v.Models == nil {
 			v.Models = []string{}
 		}
@@ -332,4 +338,105 @@ func (s *Server) handleSetActive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, settingsView(next))
+}
+
+// ---------- model tests ----------
+
+type modelReq struct {
+	ProviderID string `json:"provider_id"`
+	Model      string `json:"model"`
+}
+
+func (s *Server) clientForReq(w http.ResponseWriter, r *http.Request) (*providers.Client, modelReq, config.Settings, bool) {
+	var req modelReq
+	if !readJSON(w, r, &req) {
+		return nil, req, config.Settings{}, false
+	}
+	req.Model = strings.TrimSpace(req.Model)
+	set := s.settings.Get()
+	p, ok := set.Provider(req.ProviderID)
+	if !ok || req.Model == "" || len(req.Model) > 200 {
+		writeErr(w, http.StatusBadRequest, "unknown provider or model")
+		return nil, req, set, false
+	}
+	c, err := providers.New(providers.Config{Kind: p.Kind, BaseURL: p.BaseURL, APIKey: p.APIKey}, set.ProxyURL)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return nil, req, set, false
+	}
+	return c, req, set, true
+}
+
+// saveTest stores the last result for a model on its provider.
+func (s *Server) saveTest(providerID, model string, t config.ModelTest) {
+	_, err := s.settings.Update(func(c *config.Settings) error {
+		for i := range c.Providers {
+			if c.Providers[i].ID != providerID {
+				continue
+			}
+			next := make(map[string]config.ModelTest, len(c.Providers[i].Tests)+1)
+			for k, v := range c.Providers[i].Tests {
+				next[k] = v
+			}
+			next[model] = t
+			c.Providers[i].Tests = next
+		}
+		return nil
+	})
+	if err != nil {
+		s.logger.Warn("save model test", "error", err)
+	}
+}
+
+// handleTestModel pings one model cheaply (a one-word chat, or a lookup for
+// image-only models) and remembers the result.
+func (s *Server) handleTestModel(w http.ResponseWriter, r *http.Request) {
+	c, req, _, ok := s.clientForReq(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	res := c.Ping(ctx, req.Model)
+	t := config.ModelTest{State: res.State, Message: res.Message, LatencyMS: res.LatencyMS, At: time.Now().UTC()}
+	s.saveTest(req.ProviderID, req.Model, t)
+	writeJSON(w, http.StatusOK, map[string]any{"provider_id": req.ProviderID, "model": req.Model, "test": t})
+}
+
+// DrawTestPrompt is what Test draw asks for.
+const DrawTestPrompt = "A small red apple on a white wooden table, soft daylight, simple photo."
+
+// handleDrawTest makes one real picture with an image model. It costs one
+// image, so the panel asks first.
+func (s *Server) handleDrawTest(w http.ResponseWriter, r *http.Request) {
+	c, req, set, ok := s.clientForReq(w, r)
+	if !ok {
+		return
+	}
+	p, _ := set.Provider(req.ProviderID)
+	if !providers.CanMakeImages(p.Kind) {
+		writeErr(w, http.StatusBadRequest, "Anthropic can't make images")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Minute)
+	defer cancel()
+	start := time.Now()
+	data, mime, err := c.GenerateImage(ctx, req.Model, DrawTestPrompt, set.ImageSize)
+	ms := time.Since(start).Milliseconds()
+	t := config.ModelTest{State: "ok", LatencyMS: ms, At: time.Now().UTC()}
+	if err == nil && len(data) == 0 {
+		err = errors.New("no image in the answer")
+	}
+	if err != nil {
+		t.State, t.Message = "fail", "draw failed: "+err.Error()
+		s.saveTest(req.ProviderID, req.Model, t)
+		writeJSON(w, http.StatusOK, map[string]any{"provider_id": req.ProviderID, "model": req.Model, "test": t})
+		return
+	}
+	t.Message = fmt.Sprintf("drew a test image (%d KB)", len(data)/1024)
+	s.saveTest(req.ProviderID, req.Model, t)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"provider_id": req.ProviderID, "model": req.Model, "test": t,
+		"image": "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data),
+	})
 }

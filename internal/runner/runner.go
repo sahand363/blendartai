@@ -78,6 +78,60 @@ type Runner struct {
 	stopReq  bool
 	pauseReq bool
 	resumeCh chan struct{}
+
+	evMu   sync.Mutex
+	events []Event
+	evSeq  int64
+}
+
+// Event is one line of the live activity log.
+type Event struct {
+	Seq   int64     `json:"seq"`
+	At    time.Time `json:"at"`
+	RunID string    `json:"run_id"`
+	Step  int       `json:"step,omitempty"`
+	Level string    `json:"level"` // info, ok, warn, error
+	Text  string    `json:"text"`
+}
+
+// maxEvents is how many events stay in memory for the panel.
+const maxEvents = 400
+
+func (r *Runner) emit(runID string, step int, level, format string, args ...any) {
+	ev := Event{At: time.Now().UTC(), RunID: runID, Step: step, Level: level, Text: fmt.Sprintf(format, args...)}
+	r.evMu.Lock()
+	r.evSeq++
+	ev.Seq = r.evSeq
+	r.events = append(r.events, ev)
+	if len(r.events) > maxEvents {
+		r.events = append([]Event(nil), r.events[len(r.events)-maxEvents:]...)
+	}
+	r.evMu.Unlock()
+	prefix := ""
+	if step > 0 {
+		prefix = fmt.Sprintf("#%d ", step)
+	}
+	r.store.AppendEvent(runID, ev.At.Format(time.RFC3339)+" "+strings.ToUpper(level)+" "+prefix+ev.Text)
+}
+
+// Events returns the events after seq (oldest first).
+func (r *Runner) Events(after int64) []Event {
+	r.evMu.Lock()
+	defer r.evMu.Unlock()
+	out := []Event{}
+	for _, ev := range r.events {
+		if ev.Seq > after {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// setPhase records what the run is doing right now.
+func (r *Runner) setPhase(runID, phase, detail string) {
+	r.update(runID, func(s *store.RunState) {
+		s.Phase, s.PhaseDetail, s.PhaseSince = phase, detail, time.Now().UTC()
+	})
 }
 
 func New(st *store.Store, logger *slog.Logger) *Runner {
@@ -223,12 +277,13 @@ func (r *Runner) checkpoint(ctx context.Context, runID string) bool {
 	if r.pauseReq && !r.stopReq {
 		ch := r.resumeCh
 		r.status.Status = "paused"
-		r.status.CurrentPair = ""
+		r.status.Phase, r.status.PhaseDetail, r.status.PhaseSince = "paused", "waiting for Resume", time.Now().UTC()
 		r.status.UpdatedAt = time.Now().UTC()
 		snap := r.status
 		r.mu.Unlock()
 		_ = r.store.WriteRunState(runID, snap)
 		r.logger.Info("run paused", "run_id", runID)
+		r.emit(runID, 0, "warn", "Paused. Press Resume to go on.")
 		select {
 		case <-ch:
 		case <-ctx.Done():
@@ -237,6 +292,7 @@ func (r *Runner) checkpoint(ctx context.Context, runID string) bool {
 		if !r.stopReq && ctx.Err() == nil {
 			r.status.Status = "running"
 			r.logger.Info("run resumed", "run_id", runID)
+			defer r.emit(runID, 0, "info", "Resumed.")
 		}
 	}
 	stop := r.stopReq || ctx.Err() != nil
@@ -267,18 +323,27 @@ func (r *Runner) loop(ctx context.Context, runID string, cfg RunConfig, eng Engi
 	}
 	r.logger.Info("run started", "run_id", runID, "sources", len(sources), "target", cfg.Target,
 		"describe", cfg.DescribeModel, "image", cfg.ImageModel)
+	r.emit(runID, 0, "info", "Run started: %d source images, target %d images. Describe: %s. Image: %s.",
+		len(sources), cfg.Target, cfg.DescribeModel, cfg.ImageModel)
 
 	deck := &pairDeck{items: sources, rng: r.rng}
-	cache := map[string]imageprep.Image{}
-	load := func(p string) (imageprep.Image, error) {
-		if im, ok := cache[p]; ok {
-			return im, nil
+	type loaded struct {
+		img   imageprep.Image
+		thumb string
+	}
+	cache := map[string]loaded{}
+	load := func(p string) (loaded, error) {
+		if l, ok := cache[p]; ok {
+			return l, nil
 		}
 		im, err := eng.Load(p)
-		if err == nil {
-			cache[p] = im
+		if err != nil {
+			return loaded{}, err
 		}
-		return im, err
+		thumb, _ := r.store.SaveRunSource(runID, filepath.Base(p), im.Data, im.MIMEType)
+		l := loaded{im, thumb}
+		cache[p] = l
+		return l, nil
 	}
 	failures := 0
 	step := 0
@@ -306,14 +371,20 @@ func (r *Runner) loop(ctx context.Context, runID string, cfg RunConfig, eng Engi
 		pair := deck.next()
 		content, style := filepath.Base(pair[0]), filepath.Base(pair[1])
 		label := content + " in the style of " + style
-		r.update(runID, func(s *store.RunState) { s.CurrentPair = label; s.Steps = step })
+		r.update(runID, func(s *store.RunState) {
+			s.CurrentPair, s.Steps, s.CurrentStep = label, step, step
+			s.ContentImage, s.StyleImage, s.ContentThumb, s.StyleThumb = content, style, "", ""
+			s.Phase, s.PhaseDetail, s.PhaseSince = "loading", "reading the two images", time.Now().UTC()
+		})
+		r.emit(runID, step, "info", "Picked %s (content) + %s (style).", content, style)
 
-		imgA, err := load(pair[0])
+		a, err := load(pair[0])
 		if err == nil {
-			var imgB imageprep.Image
-			imgB, err = load(pair[1])
+			var b loaded
+			b, err = load(pair[1])
 			if err == nil {
-				err = r.doStep(ctx, runID, step, cfg, eng, pair, imgA, imgB)
+				r.update(runID, func(s *store.RunState) { s.ContentThumb, s.StyleThumb = a.thumb, b.thumb })
+				err = r.doStep(ctx, runID, step, cfg, eng, pair, a.img, b.img, a.thumb, b.thumb)
 			}
 		}
 		if err == nil {
@@ -333,43 +404,71 @@ func (r *Runner) loop(ctx context.Context, runID string, cfg RunConfig, eng Engi
 			return
 		}
 		failures++
-		r.recordError(runID, fmt.Errorf("%s: %w", label, err))
+		r.recordError(runID, step, fmt.Errorf("%s: %w", label, err))
 	}
 }
 
-func (r *Runner) doStep(ctx context.Context, runID string, step int, cfg RunConfig, eng Engine, pair [2]string, imgA, imgB imageprep.Image) error {
+func (r *Runner) doStep(ctx context.Context, runID string, step int, cfg RunConfig, eng Engine, pair [2]string, imgA, imgB imageprep.Image, thumbA, thumbB string) error {
 	content, style := filepath.Base(pair[0]), filepath.Base(pair[1])
-
-	desc, err := retry(ctx, r.sleepFn, func() (string, error) {
-		return eng.Describer.Describe(ctx, cfg.Prompt, []imageprep.Image{imgA, imgB})
-	})
-	if err != nil {
-		return fmt.Errorf("describe: %w", err)
-	}
-	r.update(runID, func(s *store.RunState) { s.Descriptions++ })
-
 	dir, err := r.store.PairDir(runID, step, content, style)
 	if err != nil {
 		return err
 	}
-	if err := store.WriteFileAtomic(filepath.Join(dir, "description.txt"), []byte(desc+"\n"), 0o644); err != nil {
-		return err
+	rec := store.StepRecord{
+		Step: step, Dir: filepath.Base(dir), Content: content, Style: style,
+		ContentThumb: thumbA, StyleThumb: thumbB, Status: "describing",
+		DescribeModel: cfg.DescribeModel, ImageModel: cfg.ImageModel, StartedAt: time.Now().UTC(),
 	}
+	_ = r.store.WriteStep(runID, rec)
+	fail := func(stage string, err error) error {
+		rec.Status, rec.Error, rec.FinishedAt = "failed", stage+": "+err.Error(), time.Now().UTC()
+		_ = r.store.WriteStep(runID, rec)
+		return fmt.Errorf("%s: %w", stage, err)
+	}
+	onWait := func(d time.Duration, err error) {
+		r.setPhase(runID, "waiting", fmt.Sprintf("retry in %s", d))
+		r.emit(runID, step, "warn", "Temporary problem (%s), retrying in %s.", shortErr(err), d)
+	}
+
+	r.setPhase(runID, "describing", cfg.DescribeModel)
+	r.emit(runID, step, "info", "Describing with %s…", cfg.DescribeModel)
+	t0 := time.Now()
+	desc, err := retry(ctx, r.sleepFn, onWait, func() (string, error) {
+		r.setPhase(runID, "describing", cfg.DescribeModel)
+		return eng.Describer.Describe(ctx, cfg.Prompt, []imageprep.Image{imgA, imgB})
+	})
+	if err != nil {
+		return fail("describe", err)
+	}
+	rec.DescribeMS = time.Since(t0).Milliseconds()
+	rec.Description, rec.Status = desc, "drawing"
+	_ = r.store.WriteStep(runID, rec)
+	r.update(runID, func(s *store.RunState) { s.Descriptions++ })
+	if err := store.WriteFileAtomic(filepath.Join(dir, "description.txt"), []byte(desc+"\n"), 0o644); err != nil {
+		return fail("save", err)
+	}
+	r.emit(runID, step, "ok", "Description ready (%d words, %.1fs).", len(strings.Fields(desc)), float64(rec.DescribeMS)/1000)
 
 	type img struct {
 		data []byte
 		mime string
 	}
-	out, err := retry(ctx, r.sleepFn, func() (img, error) {
+	r.setPhase(runID, "drawing", cfg.ImageModel)
+	r.emit(runID, step, "info", "Drawing with %s…", cfg.ImageModel)
+	t1 := time.Now()
+	out, err := retry(ctx, r.sleepFn, onWait, func() (img, error) {
+		r.setPhase(runID, "drawing", cfg.ImageModel)
 		d, m, e := eng.ImageMaker.Make(ctx, desc)
 		return img{d, m}, e
 	})
 	if err != nil {
-		return fmt.Errorf("image: %w", err)
+		return fail("image", err)
 	}
 	if len(out.data) == 0 {
-		return errors.New("image: empty answer")
+		return fail("image", errors.New("empty answer"))
 	}
+	rec.DrawMS = time.Since(t1).Milliseconds()
+	r.setPhase(runID, "saving", "")
 	meta := store.ImageMeta{
 		SourceFiles:   []string{content, style},
 		ContentImage:  content,
@@ -381,20 +480,35 @@ func (r *Runner) doStep(ctx context.Context, runID string, step int, cfg RunConf
 		Timestamp:     time.Now().UTC(),
 		EstCostUSD:    cfg.PricePerImage,
 	}
-	if err := r.store.WriteImageAndMeta(dir, 1, out.data, out.mime, meta); err != nil {
-		return fmt.Errorf("save: %w", err)
+	name, err := r.store.WriteImageAndMeta(dir, 1, out.data, out.mime, meta)
+	if err != nil {
+		return fail("save", err)
 	}
+	rec.Image = rec.Dir + "/" + name
+	rec.Status, rec.FinishedAt = "done", time.Now().UTC()
+	_ = r.store.WriteStep(runID, rec)
 	r.update(runID, func(s *store.RunState) {
 		s.ImagesDone++
 		s.PairsDone++
 		s.EstSpendUSD += cfg.PricePerImage
 	})
+	done := r.Status().ImagesDone
+	r.emit(runID, step, "ok", "Image %d/%d saved (%.1fs to draw).", done, cfg.Target, float64(rec.DrawMS)/1000)
 	return nil
 }
 
+func shortErr(err error) string {
+	s := err.Error()
+	if len(s) > 120 {
+		s = s[:120] + "…"
+	}
+	return s
+}
+
 // retry tries fn up to 4 times on temporary errors (2s, 4s, 8s) and up to
-// 3 times on rate limits (15s, 30s) before giving up.
-func retry[T any](ctx context.Context, sleep func(context.Context, time.Duration) error, fn func() (T, error)) (T, error) {
+// 3 times on rate limits (15s, 30s) before giving up. onWait (optional) is
+// told about each wait.
+func retry[T any](ctx context.Context, sleep func(context.Context, time.Duration) error, onWait func(time.Duration, error), fn func() (T, error)) (T, error) {
 	var zero T
 	tempWait := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 	quotaWait := []time.Duration{15 * time.Second, 30 * time.Second}
@@ -415,6 +529,9 @@ func retry[T any](ctx context.Context, sleep func(context.Context, time.Duration
 		default:
 			return zero, err
 		}
+		if onWait != nil {
+			onWait(d, err)
+		}
 		if serr := sleep(ctx, d); serr != nil {
 			return zero, serr
 		}
@@ -430,8 +547,9 @@ func (r *Runner) update(runID string, fn func(*store.RunState)) {
 	_ = r.store.WriteRunState(runID, snap)
 }
 
-func (r *Runner) recordError(runID string, err error) {
+func (r *Runner) recordError(runID string, step int, err error) {
 	r.logger.Warn("step failed", "run_id", runID, "error", err)
+	r.emit(runID, step, "error", "Step failed: %s", shortErr(err))
 	r.update(runID, func(s *store.RunState) {
 		s.LastError = err.Error()
 		s.Errors++
@@ -443,11 +561,21 @@ func (r *Runner) finish(runID, reason, lastErr string) {
 		s.Status = "stopped"
 		s.StopReason = reason
 		s.CurrentPair = ""
+		s.Phase, s.PhaseDetail, s.PhaseSince = "", "", time.Now().UTC()
 		if lastErr != "" {
 			s.LastError = lastErr
 		}
 	})
 	r.logger.Info("run finished", "run_id", runID, "reason", reason, "error", lastErr)
+	lvl := "ok"
+	if reason != "target_reached" {
+		lvl = "warn"
+	}
+	msg := "Run finished: " + strings.ReplaceAll(reason, "_", " ") + "."
+	if lastErr != "" {
+		msg += " " + shortErr(errors.New(lastErr))
+	}
+	r.emit(runID, 0, lvl, "%s", msg)
 }
 
 // pairDeck deals ordered (content, style) pairs of two different images in

@@ -68,6 +68,35 @@ main{max-width:1300px;margin:0 auto;padding:18px 16px 60px}
 .model button{padding:4px 9px;font-size:12px}
 .model button.act{background:var(--accent2);border-color:var(--accent2);color:#fff}
 .pill.paused,.pill.pausing{color:var(--warn);border-color:#5a4a1a}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#3a4050;flex:0 0 auto}
+.dot.ok{background:var(--good)}.dot.warn{background:var(--warn)}.dot.fail{background:var(--bad)}.dot.busy{background:var(--accent);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.3}}
+.model span.dot{flex:0 0 9px;width:9px}
+.model .tmsg{flex:0 1 40%;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.model .tmsg.fail{color:var(--bad)}.model .tmsg.warn{color:var(--warn)}
+.pipe{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+.pipe div{flex:1;min-width:80px;text-align:center;padding:8px 6px;border:1px solid var(--line);border-radius:9px;color:var(--muted);font-size:12px}
+.pipe div.done{color:var(--good);border-color:#24533a}
+.pipe div.on{color:#fff;background:var(--accent2);border-color:var(--accent2);animation:pulse 1.6s infinite}
+.pipe div.wait{color:#000;background:var(--warn);border-color:var(--warn)}
+.duo{display:flex;gap:10px;align-items:stretch}
+.duo figure{margin:0;flex:1;min-width:0}
+.duo img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:9px;border:1px solid var(--line);background:#0a0c10;cursor:zoom-in;display:block}
+.duo figcaption{font-size:11px;color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.duo .arrow{align-self:center;color:var(--muted);font-size:20px;flex:0 0 auto}
+.duo .ph{width:100%;aspect-ratio:1;border-radius:9px;border:1px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;text-align:center;padding:6px}
+.log{height:260px;overflow:auto;background:#0a0c10;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace}
+.log div{white-space:pre-wrap;word-break:break-word}
+.log .t{color:#5d6577}.log .ok{color:var(--good)}.log .warn{color:var(--warn)}.log .error{color:var(--bad)}
+.feed{display:flex;flex-direction:column;gap:12px}
+.step{display:grid;grid-template-columns:minmax(260px,420px) 1fr;gap:16px}
+.step .desc{white-space:pre-wrap;font-size:13px;line-height:1.55}
+.step .meta{font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.pill.done{color:var(--good);border-color:#24533a}.pill.failed,.pill.rejected{color:var(--bad);border-color:#5a2a2a}.pill.describing,.pill.drawing{color:var(--accent);border-color:var(--accent2)}
+.vw{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:55;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;cursor:zoom-out}
+.vw img{max-width:100%;max-height:88vh;object-fit:contain}
+.vw div{color:var(--muted);margin-top:8px;font-size:13px}
+@media(max-width:800px){.step{grid-template-columns:1fr}}
 code{background:#10131a;padding:2px 6px;border-radius:6px}
 @media(max-width:600px){.bar{gap:8px}.stat b{font-size:18px}}
 </style>
@@ -100,6 +129,7 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
   <nav id="nav">
     <button data-t="dash" class="on">Dashboard</button>
     <button data-t="sources">Sources</button>
+    <button data-t="feed">Descriptions</button>
     <button data-t="gallery">Gallery</button>
     <button data-t="picked">Picked</button>
     <button data-t="models">Models</button>
@@ -134,13 +164,27 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
       <div class="err" id="d-err"></div>
     </div>
     <div class="card">
-      <h3 style="margin-top:0">Now</h3>
-      <div class="muted">Run: <span id="d-run">none</span></div>
-      <div class="muted">Working on: <span id="d-pair">-</span></div>
-      <div class="muted">Describe: <span id="d-dm">-</span></div>
-      <div class="muted">Image: <span id="d-im">-</span></div>
-      <div class="muted">Stop reason: <span id="d-reason">-</span></div>
-      <div class="muted" style="word-break:break-word">Last error: <span id="d-lasterr">-</span></div>
+      <h3 style="margin-top:0">Live <span class="muted" style="font-weight:400;font-size:13px" id="d-stepno"></span></h3>
+      <div class="pipe" id="d-pipe"><div data-p="loading">1 · Pick pair</div><div data-p="describing">2 · Describe</div><div data-p="drawing">3 · Draw</div><div data-p="saving">4 · Save</div></div>
+      <div class="muted" style="font-size:13px;min-height:20px" id="d-phase">Idle</div>
+      <div class="duo" style="margin-top:10px">
+        <figure><div id="d-ca" class="ph">content</div><figcaption id="d-cn">Content</figcaption></figure>
+        <span class="arrow">+</span>
+        <figure><div id="d-sa" class="ph">style</div><figcaption id="d-sn">Style</figcaption></figure>
+      </div>
+    </div>
+  </div>
+  <div class="grid2" style="margin-top:14px">
+    <div class="card">
+      <h3 style="margin-top:0">Activity</h3>
+      <div class="log" id="d-log"><div class="t">Nothing yet. Start a run.</div></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Latest result</h3>
+      <div id="d-latest" class="muted">No descriptions yet.</div>
+      <div class="muted" style="margin-top:12px;font-size:12px">Run <span id="d-run">none</span> · Describe <span id="d-dm">-</span> · Image <span id="d-im">-</span></div>
+      <div class="muted" style="font-size:12px">Stop reason: <span id="d-reason">-</span></div>
+      <div class="muted" style="font-size:12px;word-break:break-word">Last error: <span id="d-lasterr">-</span></div>
     </div>
   </div>
 </section>
@@ -149,6 +193,16 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
   <div class="drop" id="drop">Drop images here or tap to upload (PNG, JPEG, WebP, up to 20 MB each)<input id="file" type="file" accept="image/png,image/jpeg,image/webp" multiple class="hidden"></div>
   <div class="muted" id="src-count" style="margin-bottom:10px"></div>
   <div class="thumbs" id="src-grid"></div>
+</section>
+
+<section id="t-feed" class="hidden">
+  <div class="row" style="margin-bottom:12px">
+    <select id="f-run"></select>
+    <select id="f-filter" style="max-width:180px"><option value="">All steps</option><option value="done">Finished</option><option value="failed">Failed</option></select>
+    <button id="f-refresh">Refresh</button>
+  </div>
+  <div class="muted" id="f-count" style="margin-bottom:10px;font-size:13px"></div>
+  <div class="feed" id="f-body"></div>
 </section>
 
 <section id="t-gallery" class="hidden">
@@ -172,7 +226,9 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
 <section id="t-models" class="hidden">
   <div class="grid2" style="margin-bottom:14px">
     <div class="card"><span class="muted">Describe model (sees both images, writes the prompt)</span><b id="m-desc" style="display:block;margin-top:6px">not picked</b></div>
-    <div class="card"><span class="muted">Image model (draws the prompt)</span><b id="m-img" style="display:block;margin-top:6px">not picked</b></div>
+    <div class="card"><span class="muted">Image model (draws the prompt)</span><b id="m-img" style="display:block;margin-top:6px">not picked</b>
+      <div class="row" style="margin-top:10px"><button id="m-draw">Test draw (makes 1 real image)</button><span class="muted" id="m-drawmsg" style="font-size:12px"></span></div>
+      <img id="m-drawimg" class="hidden" style="margin-top:10px;max-width:220px;border-radius:9px;border:1px solid var(--line)"></div>
   </div>
   <div class="card" style="margin-bottom:14px">
     <h3 style="margin-top:0">Add a provider</h3>
@@ -227,6 +283,8 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
 </section>
 </main>
 </div>
+
+<div id="vw" class="vw hidden"><img id="vw-img" alt=""><div id="vw-cap"></div></div>
 
 <div id="lb" class="lb hidden">
   <div class="stage"><img id="lb-img" alt=""></div>
@@ -296,7 +354,8 @@ function tab(t) {
   document.querySelectorAll("main section").forEach(s => s.classList.toggle("hidden", s.id !== "t-" + t));
   history.replaceState(null, "", "#" + t);
   clearInterval(poll); poll = null;
-  if (t === "dash") { loadDash(); poll = setInterval(loadStatus, 2500); }
+  if (t === "dash") { loadDash(); poll = setInterval(loadStatus, 2000); }
+  if (t === "feed") { loadFeedRuns(); poll = setInterval(() => { if (feedLive()) loadFeed(); }, 4000); }
   if (t === "sources") loadSources();
   if (t === "gallery") loadRuns();
   if (t === "picked") loadPicked();
@@ -323,7 +382,8 @@ async function loadStatus() {
   $("d-errs").textContent = s.errors || 0;
   $("d-spend").textContent = s.est_spend_usd ? "$" + s.est_spend_usd.toFixed(2) + (s.max_usd ? " / $" + s.max_usd.toFixed(2) : "") : "-";
   $("d-run").textContent = s.run_id || "none";
-  $("d-pair").textContent = s.current_pair || "-";
+  renderLive(s);
+  loadEvents();
   $("d-dm").textContent = s.describe_model || "-";
   $("d-im").textContent = s.image_model || "-";
   $("d-reason").textContent = (s.stop_reason || "-").replaceAll("_", " ");
@@ -343,6 +403,125 @@ $("d-pause").onclick = async () => {
   try { await api(resume ? "/api/resume" : "/api/pause", {method: "POST"}); toast(resume ? "Resumed" : "Pausing after the current image"); loadStatus(); } catch (e) { $("d-err").textContent = e.message; }
 };
 $("d-stop").onclick = async () => { if (!confirm("Stop this run? Images made so far are kept.")) return; try { await api("/api/stop", {method: "POST"}); toast("Stopping after the current image"); loadStatus(); } catch (e) { $("d-err").textContent = e.message; } };
+
+
+// ---------- live view ----------
+const PH = ["loading", "describing", "drawing", "saving"];
+const PH_TEXT = {loading: "Picking and reading the two images", describing: "Describe model is writing the description", drawing: "Image model is drawing", saving: "Saving the image", waiting: "Waiting to retry", paused: "Paused"};
+let liveState = null, lastLatestStep = "", lastActive = "";
+const runImg = (run, path) => BASE + "/api/image?run=" + enc(run) + "&path=" + enc(path);
+function thumbHTML(run, path, cap) {
+  if (!run || !path) return '<div class="ph">' + esc(cap) + "</div>";
+  return '<img src="' + runImg(run, path) + '" data-view="' + esc(runImg(run, path)) + '" data-cap="' + esc(cap) + '">';
+}
+function fmtSecs(ms) { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? s + "s" : Math.floor(s / 60) + "m " + (s % 60) + "s"; }
+function renderLive(s) {
+  liveState = s;
+  const live = ["running", "pausing", "paused", "stopping"].includes(s.status);
+  $("d-stepno").textContent = live && s.current_step ? "· step " + s.current_step + " · image " + (s.images_done + 1) + " of " + s.max_images : "";
+  if (PH.includes(s.phase)) lastActive = s.phase;
+  const cur = PH.includes(s.phase) ? s.phase : (s.phase === "waiting" ? lastActive : "");
+  const idx = PH.indexOf(cur);
+  $("d-pipe").querySelectorAll("div").forEach((d, i) => {
+    d.className = "";
+    if (!live || idx < 0) return;
+    if (i < idx) d.className = "done"; else if (i === idx) d.className = s.phase === "waiting" ? "wait" : "on";
+  });
+  tickPhase();
+  const sameDuo = $("d-ca").dataset.k === (s.run_id + s.content_thumb + s.style_thumb);
+  if (!sameDuo) {
+    $("d-ca").outerHTML = '<div id="d-ca" data-k="' + esc(s.run_id + s.content_thumb + s.style_thumb) + '" style="display:contents">' + thumbHTML(s.run_id, s.content_thumb, "content") + "</div>";
+    $("d-sa").outerHTML = '<div id="d-sa" style="display:contents">' + thumbHTML(s.run_id, s.style_thumb, "style") + "</div>";
+  }
+  $("d-cn").textContent = s.content_image ? "Content: " + s.content_image : "Content";
+  $("d-sn").textContent = s.style_image ? "Style: " + s.style_image : "Style";
+  const lk = s.run_id + "|" + (s.descriptions || 0) + "|" + (s.errors || 0) + "|" + s.images_done;
+  if (s.run_id && lk !== lastLatestStep) { lastLatestStep = lk; loadLatest(s.run_id); }
+}
+function tickPhase() {
+  const s = liveState; if (!s) return;
+  const live = ["running", "pausing", "paused", "stopping"].includes(s.status);
+  if (!live) { $("d-phase").textContent = s.status === "stopped" ? "Finished: " + (s.stop_reason || "").replaceAll("_", " ") : "Idle"; return; }
+  let t = PH_TEXT[s.phase] || "Working";
+  if (s.phase_detail && s.phase !== "paused") t += " (" + s.phase_detail + ")";
+  if (s.phase_since) t += " · " + fmtSecs(Date.now() - new Date(s.phase_since).getTime());
+  if (s.status === "pausing") t += " · will pause after this image";
+  if (s.status === "stopping") t += " · will stop after this image";
+  $("d-phase").textContent = t;
+}
+setInterval(() => { if (!$("t-dash").classList.contains("hidden")) tickPhase(); }, 1000);
+async function loadLatest(run) {
+  let d; try { d = await api("/api/steps?run=" + enc(run)); } catch (_) { return; }
+  const st = d.steps.find(x => x.description) ;
+  if (!st) { $("d-latest").innerHTML = '<span class="muted">No descriptions yet.</span>'; return; }
+  $("d-latest").innerHTML = '<div class="duo">' +
+    '<figure>' + thumbHTML(run, st.content_thumb, st.content) + '<figcaption>' + esc(st.content) + '</figcaption></figure><span class="arrow">+</span>' +
+    '<figure>' + thumbHTML(run, st.style_thumb, st.style) + '<figcaption>' + esc(st.style) + '</figcaption></figure><span class="arrow">→</span>' +
+    '<figure>' + (st.image ? thumbHTML(run, st.image, "step " + st.step) : '<div class="ph">' + esc(st.status) + "</div>") + '<figcaption>Step ' + st.step + "</figcaption></figure></div>" +
+    '<div style="margin-top:10px;font-size:13px;max-height:140px;overflow:auto;color:var(--text)">' + esc(st.description) + "</div>";
+}
+let evAfter = 0, evRun = "";
+async function loadEvents() {
+  let d; try { d = await api("/api/events?after=" + evAfter); } catch (_) { return; }
+  if (!d.events.length) return;
+  const box = $("d-log"), atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+  if (evAfter === 0) box.innerHTML = "";
+  for (const ev of d.events) {
+    if (ev.run_id !== evRun) { if (evRun) box.insertAdjacentHTML("beforeend", '<div class="t">──────── new run ────────</div>'); evRun = ev.run_id; }
+    const t = new Date(ev.at).toLocaleTimeString();
+    box.insertAdjacentHTML("beforeend", '<div class="' + esc(ev.level) + '"><span class="t">' + esc(t) + (ev.step ? " #" + ev.step : "") + "</span> " + esc(ev.text) + "</div>");
+    evAfter = ev.seq;
+  }
+  while (box.children.length > 400) box.firstChild.remove();
+  if (atEnd) box.scrollTop = box.scrollHeight;
+}
+document.addEventListener("click", e => {
+  const v = e.target.dataset && e.target.dataset.view;
+  if (v) { $("vw-img").src = v; $("vw-cap").textContent = e.target.dataset.cap || ""; $("vw").classList.remove("hidden"); return; }
+  if (e.target.closest && e.target.closest("#vw")) $("vw").classList.add("hidden");
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("vw").classList.add("hidden"); });
+
+// ---------- descriptions feed ----------
+let feedRuns = [];
+const feedLive = () => { const st = liveState; return st && ["running", "pausing", "paused", "stopping"].includes(st.status) && st.run_id === $("f-run").value; };
+async function loadFeedRuns() {
+  try { liveState = await api("/api/status"); } catch (_) {}
+  const d = await api("/api/runs"); feedRuns = d.runs;
+  const sel = $("f-run"), prev = sel.value;
+  sel.innerHTML = feedRuns.length ? feedRuns.map(r => '<option value="' + esc(r.run_id) + '">' + esc(r.run_id) + (r.state.status === "running" ? " · running" : "") + "</option>").join("") : "<option value=''>No runs yet</option>";
+  if (prev && feedRuns.some(r => r.run_id === prev)) sel.value = prev;
+  loadFeed();
+}
+async function loadFeed() {
+  const run = $("f-run").value;
+  if (!run) { $("f-body").innerHTML = '<p class="muted">Nothing yet. Start a run from the Dashboard.</p>'; $("f-count").textContent = ""; return; }
+  if (feedLive()) { try { liveState = await api("/api/status"); } catch (_) {} }
+  let d; try { d = await api("/api/steps?run=" + enc(run)); } catch (e) { $("f-body").innerHTML = '<p class="err">' + esc(e.message) + "</p>"; return; }
+  const f = $("f-filter").value;
+  const steps = d.steps.filter(x => !f || x.status === f);
+  const done = d.steps.filter(x => x.status === "done").length, failed = d.steps.filter(x => x.status === "failed").length;
+  $("f-count").textContent = d.steps.length + " steps · " + done + " images · " + failed + " failed" + (feedLive() ? " · live, updates every few seconds" : "");
+  $("f-body").innerHTML = steps.map(st => {
+    const secs = (st.describe_ms ? "described in " + (st.describe_ms / 1000).toFixed(1) + "s" : "") + (st.draw_ms ? " · drawn in " + (st.draw_ms / 1000).toFixed(1) + "s" : "");
+    return '<div class="card step"><div><div class="duo">' +
+      '<figure>' + thumbHTML(run, st.content_thumb, "Content: " + st.content) + '<figcaption title="' + esc(st.content) + '">Content: ' + esc(st.content) + '</figcaption></figure><span class="arrow">+</span>' +
+      '<figure>' + thumbHTML(run, st.style_thumb, "Style: " + st.style) + '<figcaption title="' + esc(st.style) + '">Style: ' + esc(st.style) + '</figcaption></figure><span class="arrow">→</span>' +
+      '<figure>' + (st.image ? thumbHTML(run, st.image, "Step " + st.step + " result") : '<div class="ph">' + esc(st.status === "failed" ? "no image" : st.status === "rejected" ? "rejected" : st.status + "…") + "</div>") +
+      '<figcaption>Result' + (st.image ? ' · <a href="#" data-keep="' + esc(st.image) + '">Keep</a>' : "") + "</figcaption></figure></div></div>" +
+      '<div><div class="meta"><b style="color:var(--text)">Step ' + st.step + '</b><span class="pill ' + esc(st.status) + '">' + esc(st.status) + "</span><span>" + esc(new Date(st.started_at).toLocaleTimeString()) + "</span><span>" + esc(secs) + "</span>" +
+      (st.description ? '<button style="padding:3px 9px;font-size:12px" data-copy="' + st.step + '">Copy</button>' : "") + "</div>" +
+      (st.description ? '<div class="desc" id="desc-' + st.step + '">' + esc(st.description) + "</div>" : '<div class="muted">' + (st.status === "describing" ? "Writing the description…" : "No description.") + "</div>") +
+      (st.error ? '<div class="err">' + esc(st.error) + "</div>" : "") +
+      '<div class="muted" style="font-size:11px;margin-top:8px">' + esc(st.describe_model || "") + " → " + esc(st.image_model || "") + "</div></div></div>";
+  }).join("") || '<p class="muted">No steps match.</p>';
+}
+$("f-run").onchange = loadFeed; $("f-filter").onchange = loadFeed; $("f-refresh").onclick = loadFeedRuns;
+$("f-body").onclick = async e => {
+  const d = e.target.dataset;
+  if (d.copy) { try { await navigator.clipboard.writeText($("desc-" + d.copy).textContent); toast("Copied"); } catch (_) { toast("Copy failed"); } }
+  if (d.keep) { e.preventDefault(); try { await api("/api/pick", {method: "POST", json: {run: $("f-run").value, path: d.keep}}); toast("Kept"); } catch (err) { toast(err.message); } }
+};
 
 // ---------- sources ----------
 async function loadSources() {
@@ -439,7 +618,25 @@ $("p-grid").onclick = async e => { const n = e.target.dataset.del; if (!n || !co
 $("p-zip").onclick = () => { location.href = BASE + "/api/picked/zip"; };
 
 // ---------- models ----------
-let urlDefaults = {}, filters = {};
+let urlDefaults = {}, filters = {}, testing = {}, checkAll = {};
+function applyTest(r) { const p = lastSet.providers.find(x => x.id === r.provider_id); if (p) p.tests[r.model] = r.test; }
+async function testOne(pid, m) {
+  testing[pid + "|" + m] = true; renderModels(lastSet);
+  try { applyTest(await api("/api/models/test", {method: "POST", json: {provider_id: pid, model: m}})); }
+  catch (e) { applyTest({provider_id: pid, model: m, test: {state: "fail", message: e.message, latency_ms: 0, at: new Date().toISOString()}}); }
+  delete testing[pid + "|" + m]; renderModels(lastSet);
+}
+async function testAll(pid) {
+  const p = lastSet.providers.find(x => x.id === pid); if (!p) return;
+  const f = (filters[pid] || "").toLowerCase();
+  const list = p.models.filter(m => !f || m.toLowerCase().includes(f));
+  if (!list.length) return;
+  if (list.length > 25 && !confirm("Test " + list.length + " models one by one? Each test is a tiny one-word request. Tip: type in Filter to test fewer.")) return;
+  const job = checkAll[pid] = {done: 0, total: list.length, stop: false};
+  for (const m of list) { if (job.stop) break; await testOne(pid, m); job.done++; renderModels(lastSet); }
+  delete checkAll[pid]; renderModels(lastSet);
+  const ok = list.filter(m => p.tests[m] && p.tests[m].state === "ok").length; toast(ok + " of " + list.length + " models answered");
+}
 function renderModels(s) {
   lastSet = s; urlDefaults = s.default_urls || {};
   $("m-desc").textContent = refLabel(s, s.describe_model); $("m-img").textContent = refLabel(s, s.image_model);
@@ -448,18 +645,34 @@ function renderModels(s) {
     const models = p.models.filter(m => !f || m.toLowerCase().includes(f));
     const isD = m => s.describe_model.provider_id === p.id && s.describe_model.model === m;
     const isI = m => s.image_model.provider_id === p.id && s.image_model.model === m;
+    const tested = models.filter(m => p.tests[m]), okN = tested.filter(m => p.tests[m].state === "ok").length;
+    const ca = checkAll[p.id];
     return '<div class="card prov"><div class="head"><b>' + esc(p.name) + ' <span class="muted" style="font-weight:400">· ' + esc(p.kind) + " · key …" + esc(p.key_last4) + "</span></b>" +
-      '<button data-check="' + p.id + '">Check again</button><button data-editkey="' + p.id + '">Change key</button><button class="danger" data-delp="' + p.id + '">Remove</button></div>' +
+      (ca ? '<span class="muted" style="font-size:12px">Testing ' + ca.done + "/" + ca.total + '</span><button class="danger" data-stopall="' + p.id + '">Stop</button>' : '<button data-testall="' + p.id + '">Test all' + (f ? " shown" : "") + " (" + models.length + ")</button>") +
+      '<button data-check="' + p.id + '">Refresh list</button><button data-editkey="' + p.id + '">Change key</button><button class="danger" data-delp="' + p.id + '">Remove</button></div>' +
       (p.base_url ? '<div class="muted" style="font-size:12px">' + esc(p.base_url) + "</div>" : "") +
-      (p.check_error ? '<div class="err">Check failed: ' + esc(p.check_error) + "</div>" : '<div class="ok" style="font-size:12px;margin-top:4px">Key works · ' + p.models.length + " models</div>") +
+      (p.check_error ? '<div class="err">Check failed: ' + esc(p.check_error) + "</div>" : '<div class="ok" style="font-size:12px;margin-top:4px">Key works · ' + p.models.length + " models" + (tested.length ? '<span class="muted"> · tested ' + tested.length + ", " + okN + " OK</span>" : "") + "</div>") +
       '<div class="row" style="margin-top:10px"><input placeholder="Filter models" data-filter="' + p.id + '" value="' + esc(filters[p.id] || "") + '"><input placeholder="Or type a model name" data-manual="' + p.id + '"><button data-manualgo="' + p.id + '">Use typed</button></div>' +
-      '<div class="models">' + (models.map(m => '<div class="model"><span>' + esc(m) + '</span><button class="' + (isD(m) ? "act" : "") + '" data-role="describe" data-p="' + p.id + '" data-m="' + esc(m) + '">' + (isD(m) ? "✓ Describe" : "Describe") + "</button>" +
-        (p.can_images ? '<button class="' + (isI(m) ? "act" : "") + '" data-role="image" data-p="' + p.id + '" data-m="' + esc(m) + '">' + (isI(m) ? "✓ Image" : "Image") + "</button>" : "") + "</div>").join("") || '<div class="model muted">No models</div>') + "</div></div>";
+      '<div class="models">' + (models.map(m => { const t = p.tests[m], busy = testing[p.id + "|" + m];
+        return '<div class="model" title="' + esc(t ? t.message + " · " + t.latency_ms + " ms · " + new Date(t.at).toLocaleString() : "not tested") + '"><span class="dot ' + (busy ? "busy" : t ? esc(t.state) : "") + '"></span><span>' + esc(m) + '</span>' +
+        '<span class="tmsg ' + (t ? esc(t.state) : "") + '">' + (busy ? "testing…" : t ? esc((t.latency_ms / 1000).toFixed(1) + "s · " + t.message) : "") + "</span>" +
+        '<button data-test="' + p.id + '" data-m="' + esc(m) + '"' + (busy ? " disabled" : "") + ">Test</button>" + '<button class="' + (isD(m) ? "act" : "") + '" data-role="describe" data-p="' + p.id + '" data-m="' + esc(m) + '">' + (isD(m) ? "✓ Describe" : "Describe") + "</button>" +
+        (p.can_images ? '<button class="' + (isI(m) ? "act" : "") + '" data-role="image" data-p="' + p.id + '" data-m="' + esc(m) + '">' + (isI(m) ? "✓ Image" : "Image") + "</button>" : "") + "</div>"; }).join("") || '<div class="model muted">No models</div>') + "</div></div>";
   }).join("") : '<p class="muted">No providers yet. Add one above.</p>';
 }
 async function loadModels() { renderModels(await api("/api/settings")); syncURL(); }
 function syncURL() { const k = $("n-kind").value; $("n-url").placeholder = urlDefaults[k] || "https://your-host/v1"; $("n-urlhint").textContent = k === "custom" ? "(required)" : "(leave empty for the official API, or set a relay)"; }
 $("n-kind").onchange = syncURL;
+$("m-draw").onclick = async () => {
+  const s = lastSet; if (!s || !s.image_model.provider_id) { $("m-drawmsg").textContent = "Pick an image model first."; return; }
+  if (!confirm("Make one real test image with " + refLabel(s, s.image_model) + "? It costs one image.")) return;
+  $("m-draw").disabled = true; $("m-drawmsg").textContent = "Drawing…"; $("m-drawimg").classList.add("hidden");
+  try { const r = await api("/api/models/draw", {method: "POST", json: {provider_id: s.image_model.provider_id, model: s.image_model.model}});
+    applyTest(r); $("m-drawmsg").textContent = r.test.message + " · " + (r.test.latency_ms / 1000).toFixed(1) + "s";
+    if (r.image) { $("m-drawimg").src = r.image; $("m-drawimg").classList.remove("hidden"); } renderModels(lastSet); }
+  catch (e) { $("m-drawmsg").textContent = e.message; }
+  $("m-draw").disabled = false;
+};
 $("n-add").onclick = async () => {
   $("n-err").textContent = ""; $("n-add").disabled = true; $("n-add").textContent = "Checking…";
   try { const s = await api("/api/providers", {method: "POST", json: {kind: $("n-kind").value, name: $("n-name").value, base_url: $("n-url").value, api_key: $("n-key").value}});
@@ -471,6 +684,9 @@ $("prov-list").addEventListener("input", e => { const id = e.target.dataset.filt
 $("prov-list").onclick = async e => {
   const d = e.target.dataset;
   try {
+    if (d.test) { testOne(d.test, d.m); return; }
+    if (d.testall) { testAll(d.testall); return; }
+    if (d.stopall) { if (checkAll[d.stopall]) checkAll[d.stopall].stop = true; return; }
     if (d.role) renderModels(await api("/api/active", {method: "PUT", json: {role: d.role, provider_id: d.p, model: d.m}}));
     else if (d.manualgo) { const m = document.querySelector('[data-manual="' + d.manualgo + '"]').value.trim(); if (!m) return;
       const role = confirm("Use " + m + " as the IMAGE model? (Cancel = describe model)") ? "image" : "describe";

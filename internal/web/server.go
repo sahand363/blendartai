@@ -79,6 +79,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/providers", a(s.handleDeleteProvider))
 	mux.HandleFunc("POST /api/providers/check", a(s.handleCheckProvider))
 	mux.HandleFunc("PUT /api/active", a(s.handleSetActive))
+	mux.HandleFunc("POST /api/models/test", a(s.handleTestModel))
+	mux.HandleFunc("POST /api/models/draw", a(s.handleDrawTest))
+	mux.HandleFunc("GET /api/events", a(s.handleEvents))
+	mux.HandleFunc("GET /api/steps", a(s.handleSteps))
 	mux.HandleFunc("GET /api/runs", a(s.handleRuns))
 	mux.HandleFunc("DELETE /api/runs", a(s.handleDeleteRun))
 	mux.HandleFunc("GET /api/image", a(s.handleImage))
@@ -417,6 +421,35 @@ func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	s.runner.Stop()
 	writeJSON(w, http.StatusOK, s.runner.Status())
+}
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	var after int64
+	for _, c := range r.URL.Query().Get("after") {
+		if c < '0' || c > '9' {
+			after = 0
+			break
+		}
+		after = after*10 + int64(c-'0')
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": s.runner.Events(after)})
+}
+
+func (s *Server) handleSteps(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("run")
+	if id == "" {
+		id = s.runner.Status().RunID
+	}
+	if id == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"run": "", "steps": []store.StepRecord{}})
+		return
+	}
+	steps, err := s.store.ListSteps(id)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"run": id, "steps": steps})
 }
 
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {

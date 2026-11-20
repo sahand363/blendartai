@@ -31,11 +31,12 @@ Shortcuts: `sudo blendartai info|restart|logs|update|rollback|reset-password`.
 
 ## Using the panel
 
-1. **Models**: add providers (OpenAI, Gemini, Anthropic, or Custom for any OpenAI-compatible API). The key is checked and the model list loaded. Mark one model **Describe** (it must see images) and one **Image** (it must make images). Anthropic can only describe.
+1. **Models**: add providers (OpenAI, Gemini, Anthropic, or Custom for any OpenAI-compatible API). The key is checked and the model list loaded. Mark one model **Describe** (it must see images) and one **Image** (it must make images). Anthropic can only describe. Each model has a **Test** button (a one-word chat for text models, a lookup for image-only models, so it costs almost nothing) and each provider has **Test all**, which tests the listed models one by one (use Filter to test a few). The active image model card has **Test draw**, which makes one real picture.
 2. **Sources**: drag in your images (PNG, JPEG, WebP, 20 MB max each). Two or more.
-3. **Dashboard**: set how many images to make and Start. Pause, Resume, Stop.
-4. **Gallery**: every step shows its image and description. Open one and press K to keep or X to reject.
-5. **Picked**: kept images, downloadable as a zip.
+3. **Dashboard**: set how many images to make and Start. Pause, Resume, Stop. The **Live** card shows the current step (Pick pair, Describe, Draw, Save) with a timer and the two source images being mixed; **Activity** is a running log; **Latest result** shows the newest description with its two sources and the image.
+4. **Descriptions**: every step of a run, newest first: the content image, the style image, the description written from them, and the image drawn from it, with timings, errors, Copy and Keep. Updates live while the run is going.
+5. **Gallery**: every step shows its image and description. Open one and press K to keep or X to reject.
+6. **Picked**: kept images, downloadable as a zip.
 
 **Settings** holds the describe instruction, image size (1K, 2K, 4K or WxH), an optional price per image and dollar cap, an outbound proxy for AI calls (http, https or socks5), and an API token for scripts and CorText.
 
@@ -44,7 +45,7 @@ A run stops by itself when it reaches the target, hits the dollar cap, the provi
 ## Files
 
 - `/etc/blendartai/blendartai.env`: port, SSL, domain (edited by the menu)
-- `/var/lib/blendartai/`: `settings.json` (providers and keys, mode 600), `auth.json`, `sources/`, `runs/<run>/<step>/` (image, `.json` metadata, `description.txt`), `picked/`
+- `/var/lib/blendartai/`: `settings.json` (providers and keys, mode 600), `auth.json`, `sources/`, `runs/<run>/<step>/` (image, `.json` metadata, `description.txt`, `step.json`), `runs/<run>/sources/` (copies of the sources the run used), `runs/<run>/events.log`, `picked/`
 
 ## Build
 

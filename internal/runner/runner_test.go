@@ -182,3 +182,48 @@ func waitFor(t *testing.T, f func() bool) {
 	}
 	t.Fatal("timed out")
 }
+
+func TestStepsAndEvents(t *testing.T) {
+	r, src, st := setup(t, 3)
+	r.Start(RunConfig{SourceDir: src, Target: 4, Prompt: "x", DescribeModel: "d", ImageModel: "i"}, Engine{Describer: &fakeDesc{}, ImageMaker: &fakeMaker{}, Load: fakeLoad})
+	r.Wait()
+	s := r.Status()
+	steps, err := st.ListSteps(s.RunID)
+	if err != nil || len(steps) != 4 {
+		t.Fatalf("want 4 steps, got %d (%v)", len(steps), err)
+	}
+	for _, x := range steps {
+		if x.Status != "done" || x.Description != "a cat painted in watercolor" || x.Image == "" ||
+			x.Content == x.Style || x.ContentThumb == "" || x.StyleThumb == "" {
+			t.Fatalf("bad step %+v", x)
+		}
+		if _, err := st.ResolveRunFile(s.RunID, x.ContentThumb); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if steps[0].Step != 4 {
+		t.Fatalf("want newest first, got %d", steps[0].Step)
+	}
+	evs := r.Events(0)
+	if len(evs) < 4*4 || evs[len(evs)-1].Text != "Run finished: target reached." {
+		t.Fatalf("events: %d, last %+v", len(evs), evs[len(evs)-1])
+	}
+	if later := r.Events(evs[len(evs)-2].Seq); len(later) != 1 {
+		t.Fatalf("after filter: %d", len(later))
+	}
+	runs, _ := st.ListRuns()
+	if len(runs[0].Pairs) != 4 {
+		t.Fatalf("sources folder leaked into the gallery: %+v", runs[0].Pairs)
+	}
+}
+
+func TestFailedStepRecorded(t *testing.T) {
+	r, src, st := setup(t, 2)
+	d := &fakeDesc{err: &providers.APIError{Status: 400, Body: "bad"}}
+	r.Start(RunConfig{SourceDir: src, Target: 3}, Engine{Describer: d, ImageMaker: &fakeMaker{}, Load: fakeLoad})
+	r.Wait()
+	steps, _ := st.ListSteps(r.Status().RunID)
+	if len(steps) != MaxConsecutiveErrors || steps[0].Status != "failed" || steps[0].Error == "" {
+		t.Fatalf("got %+v", steps)
+	}
+}

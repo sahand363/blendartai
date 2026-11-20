@@ -128,6 +128,16 @@ type Provider struct {
 	Models    []string  `json:"models,omitempty"`
 	CheckedAt time.Time `json:"checked_at,omitempty"`
 	CheckErr  string    `json:"check_error,omitempty"`
+	// Tests holds the last test result per model name.
+	Tests map[string]ModelTest `json:"model_tests,omitempty"`
+}
+
+// ModelTest is the last result of the Test button for one model.
+type ModelTest struct {
+	State     string    `json:"state"` // ok, warn, fail
+	Message   string    `json:"message"`
+	LatencyMS int64     `json:"latency_ms"`
+	At        time.Time `json:"at"`
 }
 
 // ModelRef points at one model of one provider.

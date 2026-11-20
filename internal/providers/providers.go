@@ -502,3 +502,105 @@ func orDefault(v, d string) string {
 	}
 	return v
 }
+
+// PingResult is what a model test found.
+type PingResult struct {
+	// State is "ok" (the model answered), "warn" (it exists but would not
+	// chat, which is normal for image-only models) or "fail".
+	State     string `json:"state"`
+	Message   string `json:"message"`
+	LatencyMS int64  `json:"latency_ms"`
+}
+
+// LooksImageOnly guesses from the name whether a model only draws.
+func LooksImageOnly(model string) bool {
+	m := strings.ToLower(model)
+	return strings.HasPrefix(m, "imagen") || strings.HasPrefix(m, "dall-e") || strings.HasPrefix(m, "gpt-image") ||
+		strings.Contains(m, "flux") || strings.Contains(m, "stable-diffusion") || strings.Contains(m, "sdxl")
+}
+
+// Ping checks that a model answers, as cheaply as possible: a tiny text
+// request for chat models, and a model lookup for image-only models (so a
+// test never pays for a picture).
+func (c *Client) Ping(ctx context.Context, model string) PingResult {
+	start := time.Now()
+	since := func() int64 { return time.Since(start).Milliseconds() }
+	if LooksImageOnly(model) && c.cfg.Kind != KindAnthropic {
+		if err := c.lookup(ctx, model); err != nil {
+			return PingResult{State: "fail", Message: err.Error(), LatencyMS: since()}
+		}
+		return PingResult{State: "ok", Message: "image model found (use Test draw to make a real picture)", LatencyMS: since()}
+	}
+	text, err := c.chatPing(ctx, model)
+	if err == nil {
+		if len(text) > 60 {
+			text = text[:60] + "…"
+		}
+		return PingResult{State: "ok", Message: "answered: " + text, LatencyMS: since()}
+	}
+	if IsAuth(err) || IsQuota(err) || c.cfg.Kind == KindAnthropic {
+		return PingResult{State: "fail", Message: err.Error(), LatencyMS: since()}
+	}
+	// A chat failure on a model that exists usually means it only draws or
+	// embeds; say so instead of calling it broken.
+	if lerr := c.lookup(ctx, model); lerr == nil {
+		return PingResult{State: "warn", Message: "model exists but won't chat (" + err.Error() + ")", LatencyMS: since()}
+	}
+	return PingResult{State: "fail", Message: err.Error(), LatencyMS: since()}
+}
+
+func (c *Client) chatPing(ctx context.Context, model string) (string, error) {
+	const q = "Reply with the single word OK."
+	var text string
+	switch c.cfg.Kind {
+	case KindGemini:
+		var out geminiResp
+		body := map[string]any{"contents": []map[string]any{{"role": "user", "parts": []map[string]string{{"text": q}}}}}
+		if err := c.do(ctx, http.MethodPost, "/models/"+url.PathEscape(model)+":generateContent", body, &out); err != nil {
+			return "", err
+		}
+		for _, cand := range out.Candidates {
+			for _, p := range cand.Content.Parts {
+				text += p.Text
+			}
+		}
+	case KindAnthropic:
+		var out struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		body := map[string]any{"model": model, "max_tokens": 16, "messages": []map[string]any{{"role": "user", "content": q}}}
+		if err := c.do(ctx, http.MethodPost, "/messages", body, &out); err != nil {
+			return "", err
+		}
+		for _, b := range out.Content {
+			text += b.Text
+		}
+	default:
+		var out struct {
+			Choices []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		body := map[string]any{"model": model, "messages": []map[string]any{{"role": "user", "content": q}}}
+		if err := c.do(ctx, http.MethodPost, "/chat/completions", body, &out); err != nil {
+			return "", err
+		}
+		if len(out.Choices) > 0 {
+			text = out.Choices[0].Message.Content
+		}
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", errors.New("connected, but the model sent no text")
+	}
+	return text, nil
+}
+
+// lookup asks the provider about one model by name.
+func (c *Client) lookup(ctx context.Context, model string) error {
+	return c.do(ctx, http.MethodGet, "/models/"+url.PathEscape(model), nil, nil)
+}

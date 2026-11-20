@@ -28,6 +28,14 @@ type RunState struct {
 	DescribeModel string    `json:"describe_model,omitempty"`
 	ImageModel    string    `json:"image_model,omitempty"`
 	CurrentPair   string    `json:"current_pair,omitempty"`
+	CurrentStep   int       `json:"current_step,omitempty"`
+	Phase         string    `json:"phase,omitempty"` // loading, describing, drawing, saving, waiting, paused
+	PhaseDetail   string    `json:"phase_detail,omitempty"`
+	PhaseSince    time.Time `json:"phase_since,omitzero"`
+	ContentImage  string    `json:"content_image,omitempty"`
+	StyleImage    string    `json:"style_image,omitempty"`
+	ContentThumb  string    `json:"content_thumb,omitempty"`
+	StyleThumb    string    `json:"style_thumb,omitempty"`
 	StopReason    string    `json:"stop_reason,omitempty"`
 	LastError     string    `json:"last_error,omitempty"`
 	StartedAt     time.Time `json:"started_at"`
@@ -105,7 +113,7 @@ func (s *Store) PairDir(runID string, pairIndex int, srcA, srcB string) (string,
 	if !isSafeSegment(runID) {
 		return "", ErrPathTraversal
 	}
-	name := fmt.Sprintf("%03d_%s__%s", pairIndex, sanitizeName(srcA), sanitizeName(srcB))
+	name := StepDirName(pairIndex, srcA, srcB)
 	dir := filepath.Join(s.runsDir, runID, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -129,7 +137,9 @@ func (s *Store) WriteDescribe(pairDir string, raw []byte) error {
 	return WriteFileAtomic(filepath.Join(pairDir, "describe.json"), raw, 0o644)
 }
 
-func (s *Store) WriteImageAndMeta(pairDir string, idx int, imgBytes []byte, mime string, meta ImageMeta) error {
+// WriteImageAndMeta saves NN.<ext> and NN.json in pairDir and returns the
+// image file name.
+func (s *Store) WriteImageAndMeta(pairDir string, idx int, imgBytes []byte, mime string, meta ImageMeta) (string, error) {
 	base := fmt.Sprintf("%02d", idx)
 	ext := ".png"
 	switch strings.ToLower(mime) {
@@ -139,13 +149,13 @@ func (s *Store) WriteImageAndMeta(pairDir string, idx int, imgBytes []byte, mime
 		ext = ".webp"
 	}
 	if err := WriteFileAtomic(filepath.Join(pairDir, base+ext), imgBytes, 0o644); err != nil {
-		return err
+		return "", err
 	}
 	metaBytes, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
-		return err
+		return "", err
 	}
-	return WriteFileAtomic(filepath.Join(pairDir, base+".json"), metaBytes, 0o644)
+	return base + ext, WriteFileAtomic(filepath.Join(pairDir, base+".json"), metaBytes, 0o644)
 }
 
 // ResolveRunFile safely resolves a relative path inside runs/<runID>/,
@@ -266,7 +276,7 @@ func listPairs(runPath string) []GalleryPair {
 	}
 	var pairs []GalleryPair
 	for _, e := range entries {
-		if !e.IsDir() || e.Name() == "rejected" {
+		if !e.IsDir() || e.Name() == "rejected" || e.Name() == "sources" {
 			continue
 		}
 		pairName := e.Name()

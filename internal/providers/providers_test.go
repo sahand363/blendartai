@@ -167,3 +167,32 @@ func TestNewValidates(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPing(t *testing.T) {
+	srv := fake(t, func(r *http.Request, b map[string]any) any {
+		switch {
+		case r.URL.Path == "/v1/chat/completions" && b["model"] == "chatty":
+			return map[string]any{"choices": []map[string]any{{"message": map[string]string{"content": "OK"}}}}
+		case r.URL.Path == "/v1/chat/completions":
+			return &APIError{Status: 400, Body: `{"error":{"message":"not a chat model"}}`}
+		case r.URL.Path == "/v1/models/gpt-image-1", r.URL.Path == "/v1/models/embedder":
+			return map[string]string{"id": "x"}
+		}
+		return &APIError{Status: 404, Body: "nf"}
+	})
+	defer srv.Close()
+	c, _ := New(Config{Kind: KindOpenAI, BaseURL: srv.URL + "/v1", APIKey: "k"}, "")
+	ctx := context.Background()
+	if r := c.Ping(ctx, "chatty"); r.State != "ok" || !strings.Contains(r.Message, "OK") {
+		t.Fatalf("chatty: %+v", r)
+	}
+	if r := c.Ping(ctx, "gpt-image-1"); r.State != "ok" {
+		t.Fatalf("image model: %+v", r)
+	}
+	if r := c.Ping(ctx, "embedder"); r.State != "warn" {
+		t.Fatalf("embedder: %+v", r)
+	}
+	if r := c.Ping(ctx, "ghost"); r.State != "fail" {
+		t.Fatalf("ghost: %+v", r)
+	}
+}
