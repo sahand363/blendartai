@@ -68,7 +68,7 @@ change_port() {
 ssl_menu() {
   echo "1) Domain with HTTPS (reuse a certificate on this server, or Let's Encrypt)"
   echo "2) Self-signed HTTPS (works on an IP, browser shows a warning)"
-  echo "3) Behind a reverse proxy (nginx, Caddy, CorText): plain HTTP on 127.0.0.1"
+  echo "3) Behind a reverse proxy (nginx, Caddy): plain HTTP on 127.0.0.1"
   echo "4) Certificate files I give"
   echo "5) Off (plain HTTP, not recommended)"
   local c d e crt key; read -r -p "Choose: " c </dev/tty

@@ -61,6 +61,10 @@ type RunConfig struct {
 	DescribeModel string // label for the sidecar, e.g. "openai/gpt-4.1"
 	ImageModel    string
 	ImageSize     string
+	// TextOnly skips the image model: Target counts descriptions.
+	TextOnly bool
+	// Suffix is appended to every description.
+	Suffix string
 }
 
 type Runner struct {
@@ -161,8 +165,11 @@ func (r *Runner) Running() bool {
 
 // Start begins a run. Only one run at a time.
 func (r *Runner) Start(cfg RunConfig, eng Engine) (store.RunState, error) {
-	if eng.Describer == nil || eng.ImageMaker == nil {
-		return store.RunState{}, errors.New("both models must be set")
+	if eng.Describer == nil {
+		return store.RunState{}, errors.New("pick a describe model first")
+	}
+	if eng.ImageMaker == nil && !cfg.TextOnly {
+		return store.RunState{}, errors.New("pick an image model first, or turn images off")
 	}
 	if eng.Load == nil {
 		eng.Load = imageprep.Load
@@ -187,7 +194,7 @@ func (r *Runner) Start(cfg RunConfig, eng Engine) (store.RunState, error) {
 	r.doneCh = make(chan struct{})
 	now := time.Now().UTC()
 	r.status = store.RunState{
-		RunID: runID, Status: "running", MaxImages: cfg.Target, MaxUSD: cfg.MaxUSD,
+		RunID: runID, Status: "running", MaxImages: cfg.Target, MaxUSD: cfg.MaxUSD, TextOnly: cfg.TextOnly,
 		DescribeModel: cfg.DescribeModel, ImageModel: cfg.ImageModel,
 		StartedAt: now, UpdatedAt: now,
 	}
@@ -323,8 +330,13 @@ func (r *Runner) loop(ctx context.Context, runID string, cfg RunConfig, eng Engi
 	}
 	r.logger.Info("run started", "run_id", runID, "sources", len(sources), "target", cfg.Target,
 		"describe", cfg.DescribeModel, "image", cfg.ImageModel)
-	r.emit(runID, 0, "info", "Run started: %d source images, target %d images. Describe: %s. Image: %s.",
-		len(sources), cfg.Target, cfg.DescribeModel, cfg.ImageModel)
+	if cfg.TextOnly {
+		r.emit(runID, 0, "info", "Run started: %d source images, target %d descriptions, images off. Describe: %s.",
+			len(sources), cfg.Target, cfg.DescribeModel)
+	} else {
+		r.emit(runID, 0, "info", "Run started: %d source images, target %d images. Describe: %s. Image: %s.",
+			len(sources), cfg.Target, cfg.DescribeModel, cfg.ImageModel)
+	}
 
 	deck := &pairDeck{items: sources, rng: r.rng}
 	type loaded struct {
@@ -354,11 +366,15 @@ func (r *Runner) loop(ctx context.Context, runID string, cfg RunConfig, eng Engi
 			return
 		}
 		st := r.Status()
-		if st.ImagesDone >= cfg.Target {
+		if cfg.TextOnly && st.Descriptions >= cfg.Target {
 			r.finish(runID, "target_reached", "")
 			return
 		}
-		if cfg.MaxUSD > 0 && cfg.PricePerImage > 0 && st.EstSpendUSD+cfg.PricePerImage > cfg.MaxUSD+1e-9 {
+		if !cfg.TextOnly && st.ImagesDone >= cfg.Target {
+			r.finish(runID, "target_reached", "")
+			return
+		}
+		if !cfg.TextOnly && cfg.MaxUSD > 0 && cfg.PricePerImage > 0 && st.EstSpendUSD+cfg.PricePerImage > cfg.MaxUSD+1e-9 {
 			r.finish(runID, "max_usd_reached", "")
 			return
 		}
@@ -441,11 +457,22 @@ func (r *Runner) doStep(ctx context.Context, runID string, step int, cfg RunConf
 		return fail("describe", err)
 	}
 	rec.DescribeMS = time.Since(t0).Milliseconds()
+	desc = strings.TrimSpace(desc)
+	if cfg.Suffix != "" {
+		desc += " " + cfg.Suffix
+	}
 	rec.Description, rec.Status = desc, "drawing"
 	_ = r.store.WriteStep(runID, rec)
 	r.update(runID, func(s *store.RunState) { s.Descriptions++ })
 	if err := store.WriteFileAtomic(filepath.Join(dir, "description.txt"), []byte(desc+"\n"), 0o644); err != nil {
 		return fail("save", err)
+	}
+	if cfg.TextOnly {
+		rec.Status, rec.FinishedAt = "done", time.Now().UTC()
+		_ = r.store.WriteStep(runID, rec)
+		r.update(runID, func(s *store.RunState) { s.PairsDone++ })
+		r.emit(runID, step, "ok", "Description %d/%d ready (%d words, %.1fs). Images are off.", r.Status().Descriptions, cfg.Target, len(strings.Fields(desc)), float64(rec.DescribeMS)/1000)
+		return nil
 	}
 	r.emit(runID, step, "ok", "Description ready (%d words, %.1fs).", len(strings.Fields(desc)), float64(rec.DescribeMS)/1000)
 

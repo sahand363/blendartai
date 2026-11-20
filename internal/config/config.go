@@ -30,7 +30,7 @@ const (
 	SSLSelfSigned  = "selfsigned"  // HTTPS with a generated certificate
 	SSLLetsEncrypt = "letsencrypt" // HTTPS with a Let's Encrypt certificate for Domain
 	SSLFiles       = "files"       // HTTPS with CertFile/KeyFile (e.g. from certbot or x-ui)
-	SSLProxy       = "proxy"       // plain HTTP on 127.0.0.1 behind nginx/Caddy/Apache/CorText
+	SSLProxy       = "proxy"       // plain HTTP on 127.0.0.1 behind nginx/Caddy/Apache
 )
 
 type Env struct {
@@ -148,8 +148,21 @@ type ModelRef struct {
 
 func (m ModelRef) Set() bool { return m.ProviderID != "" && m.Model != "" }
 
-// DefaultDescribePrompt asks the describer to restyle the first image.
-const DefaultDescribePrompt = `You are given two images. The FIRST image is the content: its subject, composition, pose, objects and setting. The SECOND image is the style: its medium, technique, brushwork or rendering, color palette, lighting, texture and mood.
+// DefaultDescribePrompt is Sahand's prompt from the desktop app.
+const DefaultDescribePrompt = "Analyze the subject in the first image and the artistic style of the second image. " +
+	"Generate a single-paragraph standalone image generation prompt describing the subject from the first image " +
+	"reimagined in the exact style, color palette, linework, medium, and atmosphere of the second image.\n" +
+	"CRITICAL INSTRUCTIONS:\n" +
+	"1. DO NOT refer to 'the first image', 'image 1', or 'the second image' anywhere in your text.\n" +
+	"2. Describe the subject directly (e.g., write 'A portrait of a man with...' or 'A figure wearing...').\n" +
+	"3. Output ONLY the standalone prompt text."
+
+// DefaultPromptSuffix is added to the end of every description.
+const DefaultPromptSuffix = "Centered portrait, fully in-frame subject with ample negative space around all edges, no cropping. Set against a completely solid, pure black background."
+
+// oldDefaultPrompt was the v1.0 default; settings still holding it move to
+// the new default.
+const oldDefaultPrompt = `You are given two images. The FIRST image is the content: its subject, composition, pose, objects and setting. The SECOND image is the style: its medium, technique, brushwork or rendering, color palette, lighting, texture and mood.
 
 Write ONE detailed image-generation prompt, a single paragraph of 80 to 160 words, that recreates the content of the first image rendered entirely in the visual style of the second image. Describe the style in concrete visual terms. Do not mention "first image", "second image", "reference", "photo of", or any artist names. Output only the prompt text.`
 
@@ -159,22 +172,25 @@ type Settings struct {
 	DescribeModel  ModelRef   `json:"describe_model"`
 	ImageModel     ModelRef   `json:"image_model"`
 	DescribePrompt string     `json:"describe_prompt"`
-	ImageSize      string     `json:"image_size"` // 1K, 2K, 4K or WxH
-	TargetImages   int        `json:"target_images"`
+	// PromptSuffix is appended to every description (also what the image
+	// model draws). Empty means nothing is added.
+	PromptSuffix string `json:"prompt_suffix"`
+	// TextOnly skips drawing: a run only writes descriptions.
+	TextOnly     bool   `json:"text_only"`
+	ImageSize    string `json:"image_size"` // 1K, 2K, 4K or WxH
+	TargetImages int    `json:"target_images"`
 	// Optional spend guard: PricePerImage > 0 and MaxUSD > 0 stop the run
 	// when the estimate reaches MaxUSD.
 	PricePerImage float64 `json:"price_per_image"`
 	MaxUSD        float64 `json:"max_usd"`
 	ProxyURL      string  `json:"proxy_url,omitempty"` // outbound http(s):// or socks5://
-	// APITokenHash is the sha256 (hex) of the optional bearer token for the
-	// JSON API (used by CorText). The token itself is shown once.
-	APITokenHash string `json:"api_token_hash,omitempty"`
 }
 
 func DefaultSettings() Settings {
 	return Settings{
 		Providers:      []Provider{},
 		DescribePrompt: DefaultDescribePrompt,
+		PromptSuffix:   DefaultPromptSuffix,
 		ImageSize:      "1K",
 		TargetImages:   100,
 	}
@@ -192,7 +208,8 @@ func (s *Settings) Provider(id string) (Provider, bool) {
 func (s *Settings) Validate() error {
 	s.ImageSize = strings.TrimSpace(s.ImageSize)
 	s.ProxyURL = strings.TrimSpace(s.ProxyURL)
-	if strings.TrimSpace(s.DescribePrompt) == "" {
+	s.PromptSuffix = strings.TrimSpace(s.PromptSuffix)
+	if strings.TrimSpace(s.DescribePrompt) == "" || s.DescribePrompt == oldDefaultPrompt {
 		s.DescribePrompt = DefaultDescribePrompt
 	}
 	switch {
@@ -204,6 +221,8 @@ func (s *Settings) Validate() error {
 		return errors.New("price per image must be between 0 and 10")
 	case s.MaxUSD < 0 || s.MaxUSD > 10000:
 		return errors.New("max USD must be between 0 and 10000")
+	case len(s.PromptSuffix) > 2000:
+		return errors.New("text added to every description is too long")
 	case len(s.DescribePrompt) > 8000:
 		return errors.New("describe prompt is too long")
 	}
@@ -267,6 +286,9 @@ func (s *SettingsStore) reloadLocked() error {
 	next := DefaultSettings()
 	if err := json.Unmarshal(raw, &next); err != nil {
 		return fmt.Errorf("bad settings.json: %w", err)
+	}
+	if next.DescribePrompt == oldDefaultPrompt {
+		next.DescribePrompt = DefaultDescribePrompt
 	}
 	s.cur = next
 	s.mod = fi.ModTime().UnixNano()

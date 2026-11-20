@@ -227,3 +227,26 @@ func TestFailedStepRecorded(t *testing.T) {
 		t.Fatalf("got %+v", steps)
 	}
 }
+
+func TestTextOnly(t *testing.T) {
+	r, src, st := setup(t, 4)
+	d := &fakeDesc{}
+	cfg := RunConfig{SourceDir: src, Target: 6, PricePerImage: 0.04, MaxUSD: 0.05, Prompt: "x", TextOnly: true, Suffix: "Pure black background."}
+	if _, err := r.Start(cfg, Engine{Describer: d, Load: fakeLoad}); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	s := r.Status()
+	if s.StopReason != "target_reached" || s.Descriptions != 6 || s.ImagesDone != 0 || s.EstSpendUSD != 0 {
+		t.Fatalf("got %+v", s)
+	}
+	steps, err := st.ListSteps(s.RunID)
+	if err != nil || len(steps) != 6 {
+		t.Fatalf("steps %d %v", len(steps), err)
+	}
+	for _, x := range steps {
+		if x.Status != "done" || x.Image != "" || x.Description != "a cat painted in watercolor Pure black background." {
+			t.Fatalf("step %+v", x)
+		}
+	}
+}

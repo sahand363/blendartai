@@ -21,6 +21,7 @@ type RunState struct {
 	PairsDone     int       `json:"pairs_done"`
 	EstSpendUSD   float64   `json:"est_spend_usd"`
 	MaxImages     int       `json:"max_images,omitempty"`
+	TextOnly      bool      `json:"text_only,omitempty"`
 	MaxUSD        float64   `json:"max_usd,omitempty"`
 	Steps         int       `json:"steps"`
 	Descriptions  int       `json:"descriptions"`

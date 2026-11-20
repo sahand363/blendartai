@@ -59,6 +59,10 @@ func buildEngine(set config.Settings) (runner.Engine, string, string, error) {
 	if err != nil {
 		return runner.Engine{}, "", "", err
 	}
+	if set.TextOnly {
+		eng := runner.Engine{Describer: describer{dc, set.DescribeModel.Model}}
+		return eng, dp.Name + " / " + set.DescribeModel.Model, "", nil
+	}
 	ic, ip, err := clientFor(set, set.ImageModel, "image")
 	if err != nil {
 		return runner.Engine{}, "", "", err
@@ -115,12 +119,14 @@ func settingsView(s config.Settings) map[string]any {
 		"image_model":     s.ImageModel,
 		"describe_prompt": s.DescribePrompt,
 		"default_prompt":  config.DefaultDescribePrompt,
+		"prompt_suffix":   s.PromptSuffix,
+		"default_suffix":  config.DefaultPromptSuffix,
+		"text_only":       s.TextOnly,
 		"image_size":      s.ImageSize,
 		"target_images":   s.TargetImages,
 		"price_per_image": s.PricePerImage,
 		"max_usd":         s.MaxUSD,
 		"proxy_url":       s.ProxyURL,
-		"api_token_set":   s.APITokenHash != "",
 		"default_urls":    defaults,
 	}
 }

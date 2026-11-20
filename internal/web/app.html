@@ -88,6 +88,11 @@ main{max-width:1300px;margin:0 auto;padding:18px 16px 60px}
 .log{height:260px;overflow:auto;background:#0a0c10;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace}
 .log div{white-space:pre-wrap;word-break:break-word}
 .log .t{color:#5d6577}.log .ok{color:var(--good)}.log .warn{color:var(--warn)}.log .error{color:var(--bad)}
+.sw{display:flex;align-items:center;gap:10px;margin:14px 0 4px;cursor:pointer;user-select:none}
+.sw input{display:none}.sw i{position:relative;width:40px;height:22px;border-radius:11px;background:#2a2f3a;transition:.2s;flex:0 0 40px}
+.sw i:after{content:"";position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s}
+.sw input:checked+i{background:var(--accent2)}.sw input:checked+i:after{left:21px}
+.pipe div.skip{opacity:.35;text-decoration:line-through}
 .feed{display:flex;flex-direction:column;gap:12px}
 .step{display:grid;grid-template-columns:minmax(260px,420px) 1fr;gap:16px}
 .step .desc{white-space:pre-wrap;font-size:13px;line-height:1.55}
@@ -143,7 +148,7 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
 <section id="t-dash">
   <div class="stats">
     <div class="stat"><span class="muted">Status</span><b id="d-status">idle</b></div>
-    <div class="stat"><span class="muted">Images</span><b id="d-images">0</b></div>
+    <div class="stat"><span class="muted" id="d-images-l">Images</span><b id="d-images">0</b></div>
     <div class="stat"><span class="muted">Descriptions</span><b id="d-desc">0</b></div>
     <div class="stat"><span class="muted">Errors</span><b id="d-errs">0</b></div>
     <div class="stat"><span class="muted">Est. spend</span><b id="d-spend">-</b></div>
@@ -152,8 +157,9 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
     <div class="card">
       <h3 style="margin-top:0">Run</h3>
       <p class="muted" id="d-hint"></p>
+      <label class="sw"><input type="checkbox" id="d-imgs"><i></i><span><b id="d-imgs-t">Make images</b> <span class="muted" id="d-imgs-s" style="font-size:12px"></span></span></label>
       <div class="row">
-        <div><label>Images to make</label><input id="d-target" type="number" min="1"></div>
+        <div><label id="d-target-l">Images to make</label><input id="d-target" type="number" min="1"></div>
         <div><label>Max USD (0 = off)</label><input id="d-usd" type="number" min="0" step="0.01"></div>
       </div>
       <div class="row" style="margin-top:16px">
@@ -200,6 +206,8 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
     <select id="f-run"></select>
     <select id="f-filter" style="max-width:180px"><option value="">All steps</option><option value="done">Finished</option><option value="failed">Failed</option></select>
     <button id="f-refresh">Refresh</button>
+    <button id="f-copyall">Copy all</button>
+    <button id="f-dl">Download .txt</button>
   </div>
   <div class="muted" id="f-count" style="margin-bottom:10px;font-size:13px"></div>
   <div class="feed" id="f-body"></div>
@@ -251,6 +259,9 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
       <label>Describe instruction (sent with the two images: first = content, second = style)</label>
       <textarea id="k-prompt" rows="9" style="width:100%;background:#10131a;border:1px solid var(--line);border-radius:9px;padding:9px 11px;color:var(--text);font:inherit;resize:vertical"></textarea>
       <div style="margin-top:6px"><button id="k-prompt-reset">Restore default</button></div>
+      <label>Added to the end of every description (leave empty for nothing)</label>
+      <textarea id="k-suffix" rows="3" style="width:100%;background:#10131a;border:1px solid var(--line);border-radius:9px;padding:9px 11px;color:var(--text);font:inherit;resize:vertical"></textarea>
+      <div style="margin-top:6px"><button id="k-suffix-reset">Restore default</button></div>
       <div class="row">
         <div><label>Image size (1K, 2K, 4K or 1024x1024)</label><input id="k-size"></div>
         <div><label>Images per run</label><input id="k-target" type="number" min="1"></div>
@@ -264,13 +275,6 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
       <div class="err" id="k-err"></div>
     </div>
     <div>
-      <div class="card" style="margin-bottom:14px">
-        <h3 style="margin-top:0">API token</h3>
-        <p class="muted">For CorText or scripts: send it as <code>Authorization: Bearer …</code>. Shown once.</p>
-        <div id="t-state" class="muted"></div>
-        <input id="t-new" class="hidden" readonly>
-        <div class="row" style="margin-top:12px"><button id="t-gen">Generate new token</button><button class="danger" id="t-del">Remove</button></div>
-      </div>
       <div class="card">
         <h3 style="margin-top:0">Password</h3>
         <label>Current password</label><input id="pw-old" type="password" autocomplete="current-password">
@@ -369,16 +373,31 @@ let lastSet = null;
 const refLabel = (set, ref) => { if (!ref || !ref.provider_id) return "not picked"; const p = set.providers.find(x => x.id === ref.provider_id); return (p ? p.name : "?") + " / " + ref.model; };
 async function loadDash() {
   try { const s = await api("/api/settings"); lastSet = s; $("d-target").value = s.target_images; $("d-usd").value = s.max_usd;
-    const ready = s.describe_model.provider_id && s.image_model.provider_id;
-    $("d-hint").textContent = ready ? "Each step: two random sources, " + refLabel(s, s.describe_model) + " writes the first in the style of the second, then " + refLabel(s, s.image_model) + " draws it." : "Pick a describe model and an image model in Models first.";
+    $("d-imgs").checked = !s.text_only; renderImgsToggle();
   } catch (_) {}
   loadStatus();
 }
+function renderImgsToggle() {
+  const s = lastSet; if (!s) return;
+  const on = $("d-imgs").checked;
+  $("d-imgs-s").textContent = on ? "describe, then draw each one" : "off: descriptions only, nothing is drawn or billed for images";
+  $("d-target-l").textContent = on ? "Images to make" : "Descriptions to make";
+  $("d-usd").disabled = !on;
+  const ready = s.describe_model.provider_id && (!on || s.image_model.provider_id);
+  $("d-hint").textContent = !ready ? (on ? "Pick a describe model and an image model in Models first." : "Pick a describe model in Models first.")
+    : on ? "Each step: two random sources, " + refLabel(s, s.describe_model) + " writes the first in the style of the second, then " + refLabel(s, s.image_model) + " draws it."
+    : "Each step: two random sources, " + refLabel(s, s.describe_model) + " writes the first in the style of the second. Copy them from Descriptions.";
+}
+$("d-imgs").onchange = async () => {
+  renderImgsToggle();
+  try { lastSet = await api("/api/settings", {method: "PUT", json: {text_only: !$("d-imgs").checked}}); } catch (e) { $("d-err").textContent = e.message; }
+};
 async function loadStatus() {
   let s; try { s = await api("/api/status"); } catch (_) { return; }
   $("d-status").innerHTML = '<span class="pill ' + esc(s.status) + '">' + esc(s.status) + "</span>";
-  $("d-images").textContent = s.images_done + (s.max_images ? " / " + s.max_images : "");
-  $("d-desc").textContent = s.descriptions || 0;
+  $("d-images-l").textContent = s.text_only ? "Images (off this run)" : "Images";
+  $("d-images").textContent = s.text_only ? "-" : s.images_done + (s.max_images ? " / " + s.max_images : "");
+  $("d-desc").textContent = (s.descriptions || 0) + (s.text_only && s.max_images ? " / " + s.max_images : "");
   $("d-errs").textContent = s.errors || 0;
   $("d-spend").textContent = s.est_spend_usd ? "$" + s.est_spend_usd.toFixed(2) + (s.max_usd ? " / $" + s.max_usd.toFixed(2) : "") : "-";
   $("d-run").textContent = s.run_id || "none";
@@ -391,11 +410,12 @@ async function loadStatus() {
   const live = ["running", "pausing", "paused", "stopping"].includes(s.status);
   $("d-start").disabled = live; $("d-stop").disabled = !live || s.status === "stopping";
   $("d-pause").disabled = !live || s.status === "stopping";
+  $("d-imgs").disabled = live;
   $("d-pause").textContent = (s.status === "paused" || s.status === "pausing") ? "Resume" : "Pause";
 }
 $("d-start").onclick = async () => {
   $("d-err").textContent = "";
-  try { await api("/api/run", {method: "POST", json: {target_images: +$("d-target").value || 0, max_usd: +$("d-usd").value || 0}}); toast("Run started"); loadStatus(); }
+  try { await api("/api/run", {method: "POST", json: {target_images: +$("d-target").value || 0, max_usd: +$("d-usd").value || 0, text_only: !$("d-imgs").checked}}); toast("Run started"); loadStatus(); }
   catch (e) { $("d-err").textContent = e.message; }
 };
 $("d-pause").onclick = async () => {
@@ -418,12 +438,13 @@ function fmtSecs(ms) { const s = Math.max(0, Math.round(ms / 1000)); return s < 
 function renderLive(s) {
   liveState = s;
   const live = ["running", "pausing", "paused", "stopping"].includes(s.status);
-  $("d-stepno").textContent = live && s.current_step ? "· step " + s.current_step + " · image " + (s.images_done + 1) + " of " + s.max_images : "";
+  $("d-stepno").textContent = live && s.current_step ? "· step " + s.current_step + (s.text_only ? " · description " + Math.min((s.descriptions || 0) + 1, s.max_images) + " of " + s.max_images + " · images off" : " · image " + (s.images_done + 1) + " of " + s.max_images) : "";
   if (PH.includes(s.phase)) lastActive = s.phase;
   const cur = PH.includes(s.phase) ? s.phase : (s.phase === "waiting" ? lastActive : "");
   const idx = PH.indexOf(cur);
   $("d-pipe").querySelectorAll("div").forEach((d, i) => {
     d.className = "";
+    if (s.text_only && i >= 2) { d.className = "skip"; return; }
     if (!live || idx < 0) return;
     if (i < idx) d.className = "done"; else if (i === idx) d.className = s.phase === "waiting" ? "wait" : "on";
   });
@@ -445,8 +466,9 @@ function tickPhase() {
   let t = PH_TEXT[s.phase] || "Working";
   if (s.phase_detail && s.phase !== "paused") t += " (" + s.phase_detail + ")";
   if (s.phase_since) t += " · " + fmtSecs(Date.now() - new Date(s.phase_since).getTime());
-  if (s.status === "pausing") t += " · will pause after this image";
-  if (s.status === "stopping") t += " · will stop after this image";
+  const unit = s.text_only ? "description" : "image";
+  if (s.status === "pausing") t += " · will pause after this " + unit;
+  if (s.status === "stopping") t += " · will stop after this " + unit;
   $("d-phase").textContent = t;
 }
 setInterval(() => { if (!$("t-dash").classList.contains("hidden")) tickPhase(); }, 1000);
@@ -457,7 +479,7 @@ async function loadLatest(run) {
   $("d-latest").innerHTML = '<div class="duo">' +
     '<figure>' + thumbHTML(run, st.content_thumb, st.content) + '<figcaption>' + esc(st.content) + '</figcaption></figure><span class="arrow">+</span>' +
     '<figure>' + thumbHTML(run, st.style_thumb, st.style) + '<figcaption>' + esc(st.style) + '</figcaption></figure><span class="arrow">→</span>' +
-    '<figure>' + (st.image ? thumbHTML(run, st.image, "step " + st.step) : '<div class="ph">' + esc(st.status) + "</div>") + '<figcaption>Step ' + st.step + "</figcaption></figure></div>" +
+    '<figure>' + (st.image ? thumbHTML(run, st.image, "step " + st.step) : '<div class="ph">' + esc(!st.image_model && st.status === "done" ? "text only" : st.status) + "</div>") + '<figcaption>Step ' + st.step + "</figcaption></figure></div>" +
     '<div style="margin-top:10px;font-size:13px;max-height:140px;overflow:auto;color:var(--text)">' + esc(st.description) + "</div>";
 }
 let evAfter = 0, evRun = "";
@@ -483,7 +505,13 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => { if (e.key === "Escape") $("vw").classList.add("hidden"); });
 
 // ---------- descriptions feed ----------
-let feedRuns = [];
+let feedRuns = [], feedSteps = [];
+const allDescs = () => feedSteps.filter(x => x.description).slice().sort((a, b) => a.step - b.step).map(x => x.description.trim());
+$("f-copyall").onclick = async () => { const t = allDescs(); if (!t.length) return toast("No descriptions yet");
+  try { await navigator.clipboard.writeText(t.join("\n\n")); toast("Copied " + t.length + " descriptions"); } catch (_) { toast("Copy failed, use Download"); } };
+$("f-dl").onclick = () => { const t = allDescs(); if (!t.length) return toast("No descriptions yet");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([t.join("\n\n") + "\n"], {type: "text/plain"}));
+  a.download = "descriptions-" + ($("f-run").value || "run") + ".txt"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); };
 const feedLive = () => { const st = liveState; return st && ["running", "pausing", "paused", "stopping"].includes(st.status) && st.run_id === $("f-run").value; };
 async function loadFeedRuns() {
   try { liveState = await api("/api/status"); } catch (_) {}
@@ -501,19 +529,21 @@ async function loadFeed() {
   const f = $("f-filter").value;
   const steps = d.steps.filter(x => !f || x.status === f);
   const done = d.steps.filter(x => x.status === "done").length, failed = d.steps.filter(x => x.status === "failed").length;
-  $("f-count").textContent = d.steps.length + " steps · " + done + " images · " + failed + " failed" + (feedLive() ? " · live, updates every few seconds" : "");
+  feedSteps = d.steps;
+  const nimg = d.steps.filter(x => x.image).length, ndesc = d.steps.filter(x => x.description).length;
+  $("f-count").textContent = d.steps.length + " steps · " + ndesc + " descriptions · " + (d.steps.some(x => x.image_model) ? nimg + " images" : "images off") + " · " + failed + " failed" + (feedLive() ? " · live, updates every few seconds" : "");
   $("f-body").innerHTML = steps.map(st => {
     const secs = (st.describe_ms ? "described in " + (st.describe_ms / 1000).toFixed(1) + "s" : "") + (st.draw_ms ? " · drawn in " + (st.draw_ms / 1000).toFixed(1) + "s" : "");
     return '<div class="card step"><div><div class="duo">' +
       '<figure>' + thumbHTML(run, st.content_thumb, "Content: " + st.content) + '<figcaption title="' + esc(st.content) + '">Content: ' + esc(st.content) + '</figcaption></figure><span class="arrow">+</span>' +
       '<figure>' + thumbHTML(run, st.style_thumb, "Style: " + st.style) + '<figcaption title="' + esc(st.style) + '">Style: ' + esc(st.style) + '</figcaption></figure><span class="arrow">→</span>' +
-      '<figure>' + (st.image ? thumbHTML(run, st.image, "Step " + st.step + " result") : '<div class="ph">' + esc(st.status === "failed" ? "no image" : st.status === "rejected" ? "rejected" : st.status + "…") + "</div>") +
+      '<figure>' + (st.image ? thumbHTML(run, st.image, "Step " + st.step + " result") : '<div class="ph">' + esc(st.status === "failed" ? "no image" : st.status === "rejected" ? "rejected" : st.status === "done" && !st.image_model ? "text only" : st.status + "…") + "</div>") +
       '<figcaption>Result' + (st.image ? ' · <a href="#" data-keep="' + esc(st.image) + '">Keep</a>' : "") + "</figcaption></figure></div></div>" +
       '<div><div class="meta"><b style="color:var(--text)">Step ' + st.step + '</b><span class="pill ' + esc(st.status) + '">' + esc(st.status) + "</span><span>" + esc(new Date(st.started_at).toLocaleTimeString()) + "</span><span>" + esc(secs) + "</span>" +
       (st.description ? '<button style="padding:3px 9px;font-size:12px" data-copy="' + st.step + '">Copy</button>' : "") + "</div>" +
       (st.description ? '<div class="desc" id="desc-' + st.step + '">' + esc(st.description) + "</div>" : '<div class="muted">' + (st.status === "describing" ? "Writing the description…" : "No description.") + "</div>") +
       (st.error ? '<div class="err">' + esc(st.error) + "</div>" : "") +
-      '<div class="muted" style="font-size:11px;margin-top:8px">' + esc(st.describe_model || "") + " → " + esc(st.image_model || "") + "</div></div></div>";
+      '<div class="muted" style="font-size:11px;margin-top:8px">' + esc(st.describe_model || "") + (st.image_model ? " → " + esc(st.image_model) : " · images off") + "</div></div></div>";
   }).join("") || '<p class="muted">No steps match.</p>';
 }
 $("f-run").onchange = loadFeed; $("f-filter").onchange = loadFeed; $("f-refresh").onclick = loadFeedRuns;
@@ -703,19 +733,16 @@ async function loadSettings() {
   const s = await api("/api/settings"); lastSet = s;
   $("k-prompt").value = s.describe_prompt; $("k-size").value = s.image_size; $("k-target").value = s.target_images;
   $("k-price").value = s.price_per_image; $("k-usd").value = s.max_usd; $("k-proxy").value = s.proxy_url || "";
-  $("t-state").textContent = s.api_token_set ? "A token is active." : "No token yet."; $("t-new").classList.add("hidden");
+  $("k-suffix").value = s.prompt_suffix || "";
 }
 $("k-prompt-reset").onclick = () => { if (lastSet) $("k-prompt").value = lastSet.default_prompt; };
+$("k-suffix-reset").onclick = () => { if (lastSet) $("k-suffix").value = lastSet.default_suffix; };
 $("k-save").onclick = async () => {
   $("k-err").textContent = "";
-  try { await api("/api/settings", {method: "PUT", json: {describe_prompt: $("k-prompt").value, image_size: $("k-size").value, target_images: +$("k-target").value,
+  try { await api("/api/settings", {method: "PUT", json: {describe_prompt: $("k-prompt").value, prompt_suffix: $("k-suffix").value, image_size: $("k-size").value, target_images: +$("k-target").value,
     price_per_image: +$("k-price").value, max_usd: +$("k-usd").value, proxy_url: $("k-proxy").value}}); toast("Saved"); loadSettings(); }
   catch (e) { $("k-err").textContent = e.message; }
 };
-$("t-gen").onclick = async () => { if (!confirm("Make a new token? The old one stops working.")) return;
-  const d = await api("/api/settings/token", {method: "POST"}); $("t-new").value = d.token; $("t-new").classList.remove("hidden"); $("t-new").select();
-  $("t-state").textContent = "Copy it now, it won't be shown again."; };
-$("t-del").onclick = async () => { if (!confirm("Remove the API token?")) return; await api("/api/settings/token", {method: "DELETE"}); loadSettings(); };
 $("pw-go").onclick = async () => { $("pw-err").textContent = "";
   try { await api("/api/password", {method: "POST", json: {old: $("pw-old").value, new: $("pw-new").value}}); $("pw-old").value = $("pw-new").value = ""; toast("Password changed, other devices logged out"); }
   catch (e) { $("pw-err").textContent = e.message; } };

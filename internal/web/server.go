@@ -98,8 +98,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/picked/zip", a(s.handlePickedZip))
 	mux.HandleFunc("GET /api/settings", a(s.handleGetSettings))
 	mux.HandleFunc("PUT /api/settings", a(s.handlePutSettings))
-	mux.HandleFunc("POST /api/settings/token", a(s.handleNewToken))
-	mux.HandleFunc("DELETE /api/settings/token", a(s.handleDeleteToken))
 
 	var h http.Handler = mux
 	if bp := s.opt.BasePath; bp != "" {
@@ -189,28 +187,10 @@ func sessionToken(r *http.Request) string {
 	return ""
 }
 
-func bearer(r *http.Request) string {
-	h := r.Header.Get("Authorization")
-	if len(h) > 7 && strings.EqualFold(h[:7], "Bearer ") {
-		return strings.TrimSpace(h[7:])
-	}
-	return ""
-}
-
-// requireAuth accepts a panel session, or the API token from Settings as a
-// Bearer header (for CorText and scripts). Cookie requests that change
-// something must carry the X-Blendartai header, which a cross-site form
-// cannot send.
+// requireAuth accepts a panel session. Requests that change something must
+// carry the X-Blendartai header, which a cross-site form cannot send.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if tok := bearer(r); tok != "" {
-			if auth.TokenMatches(tok, s.settings.Get().APITokenHash) {
-				next(w, r)
-				return
-			}
-			writeErr(w, http.StatusUnauthorized, "invalid API token")
-			return
-		}
 		if !s.auth.Valid(sessionToken(r)) {
 			writeErr(w, http.StatusUnauthorized, "please log in")
 			return
@@ -358,8 +338,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Target int     `json:"target_images"`
-		MaxUSD float64 `json:"max_usd"`
+		Target   int     `json:"target_images"`
+		MaxUSD   float64 `json:"max_usd"`
+		TextOnly *bool   `json:"text_only"`
 	}
 	if r.ContentLength != 0 && !readJSON(w, r, &req) {
 		return
@@ -369,6 +350,14 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	set := s.settings.Get()
+	if req.TextOnly != nil && *req.TextOnly != set.TextOnly {
+		next, err := s.settings.Update(func(c *config.Settings) error { c.TextOnly = *req.TextOnly; return nil })
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		set = next
+	}
 	eng, dLabel, iLabel, err := buildEngine(set)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -383,6 +372,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		SourceDir: s.opt.SourcesDir, Target: set.TargetImages,
 		PricePerImage: set.PricePerImage, MaxUSD: set.MaxUSD,
 		Prompt: set.DescribePrompt, DescribeModel: dLabel, ImageModel: iLabel, ImageSize: set.ImageSize,
+		TextOnly: set.TextOnly, Suffix: set.PromptSuffix,
 	}
 	if req.Target > 0 {
 		rc.Target = min(req.Target, 10000)
@@ -623,6 +613,8 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		DescribePrompt *string  `json:"describe_prompt"`
+		PromptSuffix   *string  `json:"prompt_suffix"`
+		TextOnly       *bool    `json:"text_only"`
 		ImageSize      *string  `json:"image_size"`
 		TargetImages   *int     `json:"target_images"`
 		PricePerImage  *float64 `json:"price_per_image"`
@@ -635,6 +627,12 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	next, err := s.settings.Update(func(c *config.Settings) error {
 		if req.DescribePrompt != nil {
 			c.DescribePrompt = *req.DescribePrompt
+		}
+		if req.PromptSuffix != nil {
+			c.PromptSuffix = *req.PromptSuffix
+		}
+		if req.TextOnly != nil {
+			c.TextOnly = *req.TextOnly
 		}
 		if req.ImageSize != nil {
 			c.ImageSize = *req.ImageSize
@@ -658,29 +656,6 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, settingsView(next))
-}
-
-func (s *Server) handleNewToken(w http.ResponseWriter, r *http.Request) {
-	tok := auth.NewAPIToken()
-	if _, err := s.settings.Update(func(c *config.Settings) error {
-		c.APITokenHash = auth.HashToken(tok)
-		return nil
-	}); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"token": tok})
-}
-
-func (s *Server) handleDeleteToken(w http.ResponseWriter, r *http.Request) {
-	if _, err := s.settings.Update(func(c *config.Settings) error {
-		c.APITokenHash = ""
-		return nil
-	}); err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // ---------- helpers ----------
