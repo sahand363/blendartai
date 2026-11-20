@@ -134,6 +134,7 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
   <nav id="nav">
     <button data-t="dash" class="on">Dashboard</button>
     <button data-t="sources">Sources</button>
+    <button data-t="styles">Styles</button>
     <button data-t="feed">Descriptions</button>
     <button data-t="gallery">Gallery</button>
     <button data-t="picked">Picked</button>
@@ -196,9 +197,20 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
 </section>
 
 <section id="t-sources" class="hidden">
-  <div class="drop" id="drop">Drop images here or tap to upload (PNG, JPEG, WebP, up to 20 MB each)<input id="file" type="file" accept="image/png,image/jpeg,image/webp" multiple class="hidden"></div>
+  <p class="muted" style="margin-top:0">Sources give the subject (the first image). Depending on Settings they can also be used as styles.</p>
+  <div class="drop" id="drop"></div>
   <div class="muted" id="src-count" style="margin-bottom:10px"></div>
   <div class="thumbs" id="src-grid"></div>
+</section>
+
+<section id="t-styles" class="hidden">
+  <div class="row" style="align-items:flex-end;margin-bottom:12px">
+    <div style="flex:2"><p class="muted" style="margin:0">Styles give the look (the second image): medium, palette, linework, mood.</p></div>
+    <div><label>Style image comes from</label><select id="sty-from"><option value="styles">Styles only</option><option value="sources">Sources only</option><option value="both">Styles and Sources</option></select></div>
+  </div>
+  <div class="drop" id="sty-drop"></div>
+  <div class="muted" id="sty-count" style="margin-bottom:10px"></div>
+  <div class="thumbs" id="sty-grid"></div>
 </section>
 
 <section id="t-feed" class="hidden">
@@ -269,6 +281,14 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
       <div class="row">
         <div><label>Price per image, USD (for the estimate)</label><input id="k-price" type="number" step="0.0001" min="0"></div>
         <div><label>Max USD per run (0 = off)</label><input id="k-usd" type="number" step="0.01" min="0"></div>
+      </div>
+      <div class="row">
+        <div><label>Style image comes from</label><select id="k-stylefrom"><option value="styles">Styles only</option><option value="sources">Sources only</option><option value="both">Styles and Sources</option></select></div>
+        <div><label>Pause between steps, seconds (0 = none)</label><input id="k-delay" type="number" min="0" max="3600"></div>
+      </div>
+      <div class="row">
+        <div><label>On a rate limit, wait (seconds) then retry</label><input id="k-lwait" type="number" min="5" max="3600"></div>
+        <div><label>Retries before the run stops (0 = stop at once)</label><input id="k-lret" type="number" min="0" max="100"></div>
       </div>
       <label>Outbound proxy for AI calls (optional: http://, https:// or socks5://)</label><input id="k-proxy" placeholder="socks5://127.0.0.1:1080">
       <div style="margin-top:16px"><button class="primary" id="k-save">Save</button></div>
@@ -360,7 +380,8 @@ function tab(t) {
   clearInterval(poll); poll = null;
   if (t === "dash") { loadDash(); poll = setInterval(loadStatus, 2000); }
   if (t === "feed") { loadFeedRuns(); poll = setInterval(() => { if (feedLive()) loadFeed(); }, 4000); }
-  if (t === "sources") loadSources();
+  if (t === "sources") boxes.src.load();
+  if (t === "styles") { boxes.sty.load(); api("/api/settings").then(x => { lastSet = x; $("sty-from").value = x.style_from; }).catch(() => {}); }
   if (t === "gallery") loadRuns();
   if (t === "picked") loadPicked();
   if (t === "settings") loadSettings();
@@ -377,6 +398,7 @@ async function loadDash() {
   } catch (_) {}
   loadStatus();
 }
+const STYLE_TXT = {styles: "Styles", sources: "Sources", both: "Styles or Sources"};
 function renderImgsToggle() {
   const s = lastSet; if (!s) return;
   const on = $("d-imgs").checked;
@@ -385,8 +407,8 @@ function renderImgsToggle() {
   $("d-usd").disabled = !on;
   const ready = s.describe_model.provider_id && (!on || s.image_model.provider_id);
   $("d-hint").textContent = !ready ? (on ? "Pick a describe model and an image model in Models first." : "Pick a describe model in Models first.")
-    : on ? "Each step: two random sources, " + refLabel(s, s.describe_model) + " writes the first in the style of the second, then " + refLabel(s, s.image_model) + " draws it."
-    : "Each step: two random sources, " + refLabel(s, s.describe_model) + " writes the first in the style of the second. Copy them from Descriptions.";
+    : on ? "Each step: a source and a style from " + STYLE_TXT[s.style_from] + ", " + refLabel(s, s.describe_model) + " writes the first in the style of the second, then " + refLabel(s, s.image_model) + " draws it."
+    : "Each step: a source and a style from " + STYLE_TXT[s.style_from] + ", " + refLabel(s, s.describe_model) + " writes the first in the style of the second. Copy them from Descriptions.";
 }
 $("d-imgs").onchange = async () => {
   renderImgsToggle();
@@ -427,7 +449,7 @@ $("d-stop").onclick = async () => { if (!confirm("Stop this run? Images made so 
 
 // ---------- live view ----------
 const PH = ["loading", "describing", "drawing", "saving"];
-const PH_TEXT = {loading: "Picking and reading the two images", describing: "Describe model is writing the description", drawing: "Image model is drawing", saving: "Saving the image", waiting: "Waiting to retry", paused: "Paused"};
+const PH_TEXT = {loading: "Picking and reading the two images", describing: "Describe model is writing the description", drawing: "Image model is drawing", saving: "Saving the image", waiting: "Waiting to retry", resting: "Pausing between steps", paused: "Paused"};
 let liveState = null, lastLatestStep = "", lastActive = "";
 const runImg = (run, path) => BASE + "/api/image?run=" + enc(run) + "&path=" + enc(path);
 function thumbHTML(run, path, cap) {
@@ -553,36 +575,45 @@ $("f-body").onclick = async e => {
   if (d.keep) { e.preventDefault(); try { await api("/api/pick", {method: "POST", json: {run: $("f-run").value, path: d.keep}}); toast("Kept"); } catch (err) { toast(err.message); } }
 };
 
-// ---------- sources ----------
-async function loadSources() {
-  const d = await api("/api/sources");
-  $("src-count").textContent = d.files.length + " source images" + (d.files.length < 2 ? " (need at least 2)" : "");
-  $("src-grid").innerHTML = d.files.map(f => {
-    const u = BASE + "/api/sources/file?name=" + enc(f.name);
-    return '<div class="thumb"><img loading="lazy" src="' + u + '" data-full="' + u + '"><div class="cap">' + esc(f.name) + '</div><button class="x" data-del="' + esc(f.name) + '">✕</button></div>';
-  }).join("");
+// ---------- sources and styles ----------
+const DROP_TXT = "Drop images here or tap to upload (PNG, JPEG, WebP, up to 20 MB each)";
+function makeBox(api_, drop, count, grid, noun, need) {
+  const box = {};
+  box.load = async () => {
+    const d = await api("/api/" + api_);
+    $(count).textContent = d.files.length + " " + noun + (need && d.files.length < need ? " (need at least " + need + ")" : "");
+    $(grid).innerHTML = d.files.map(f => {
+      const u = BASE + "/api/" + api_ + "/file?name=" + enc(f.name);
+      return '<div class="thumb"><img loading="lazy" src="' + u + '" data-view="' + u + '" data-cap="' + esc(f.name) + '"><div class="cap">' + esc(f.name) + '</div><button class="x" data-del="' + esc(f.name) + '">✕</button></div>';
+    }).join("") || '<p class="muted">Empty.</p>';
+  };
+  const reset = () => {
+    $(drop).innerHTML = DROP_TXT + '<input type="file" accept="image/png,image/jpeg,image/webp" multiple class="hidden">';
+    $(drop).querySelector("input").onchange = e => upload(e.target.files);
+  };
+  async function upload(files) {
+    if (!files.length) return;
+    const fd = new FormData(); [...files].forEach(f => fd.append("files", f, f.name));
+    $(drop).textContent = "Uploading " + files.length + "…";
+    try { const r = await api("/api/" + api_, {method: "POST", body: fd}); toast(r.saved.length + " uploaded" + (r.errors.length ? ", " + r.errors.length + " failed" : "")); if (r.errors.length) alert(r.errors.join("\n")); }
+    catch (e) { alert(e.message); }
+    reset(); box.load();
+  }
+  $(grid).onclick = async e => {
+    const n = e.target.dataset.del; if (!n) return;
+    if (!confirm("Delete " + n + "?")) return; await api("/api/" + api_ + "?name=" + enc(n), {method: "DELETE"}); box.load();
+  };
+  reset();
+  $(drop).onclick = e => { if (e.target.tagName !== "INPUT") $(drop).querySelector("input").click(); };
+  $(drop).ondragover = e => { e.preventDefault(); $(drop).classList.add("over"); };
+  $(drop).ondragleave = () => $(drop).classList.remove("over");
+  $(drop).ondrop = e => { e.preventDefault(); $(drop).classList.remove("over"); upload(e.dataTransfer.files); };
+  return box;
 }
-$("src-grid").onclick = async e => {
-  const n = e.target.dataset.del; if (n) { if (!confirm("Delete " + n + "?")) return; await api("/api/sources?name=" + enc(n), {method: "DELETE"}); loadSources(); return; }
-  if (e.target.dataset.full) window.open(e.target.dataset.full, "_blank");
+const boxes = {src: makeBox("sources", "drop", "src-count", "src-grid", "source images", 1), sty: makeBox("styles", "sty-drop", "sty-count", "sty-grid", "style images", 0)};
+$("sty-from").onchange = async () => {
+  try { lastSet = await api("/api/settings", {method: "PUT", json: {style_from: $("sty-from").value}}); toast("Saved"); } catch (e) { alert(e.message); }
 };
-async function upload(files) {
-  if (!files.length) return;
-  const fd = new FormData(); [...files].forEach(f => fd.append("files", f, f.name));
-  $("drop").textContent = "Uploading " + files.length + "…";
-  try { const r = await api("/api/sources", {method: "POST", body: fd}); toast(r.saved.length + " uploaded" + (r.errors.length ? ", " + r.errors.length + " failed" : "")); if (r.errors.length) alert(r.errors.join("\n")); }
-  catch (e) { alert(e.message); }
-  resetDrop(); loadSources();
-}
-function resetDrop() {
-  $("drop").innerHTML = 'Drop images here or tap to upload (PNG, JPEG, WebP, up to 20 MB each)<input id="file" type="file" accept="image/png,image/jpeg,image/webp" multiple class="hidden">';
-  $("file").onchange = e => upload(e.target.files);
-}
-resetDrop();
-$("drop").onclick = e => { if (e.target.id !== "file") $("file").click(); };
-$("drop").ondragover = e => { e.preventDefault(); $("drop").classList.add("over"); };
-$("drop").ondragleave = () => $("drop").classList.remove("over");
-$("drop").ondrop = e => { e.preventDefault(); $("drop").classList.remove("over"); upload(e.dataTransfer.files); };
 
 // ---------- gallery ----------
 let runs = [], flat = [], cur = -1;
@@ -733,6 +764,7 @@ async function loadSettings() {
   const s = await api("/api/settings"); lastSet = s;
   $("k-prompt").value = s.describe_prompt; $("k-size").value = s.image_size; $("k-target").value = s.target_images;
   $("k-price").value = s.price_per_image; $("k-usd").value = s.max_usd; $("k-proxy").value = s.proxy_url || "";
+  $("k-stylefrom").value = s.style_from; $("k-delay").value = s.step_delay_sec; $("k-lwait").value = s.limit_wait_sec; $("k-lret").value = s.limit_retries;
   $("k-suffix").value = s.prompt_suffix || "";
 }
 $("k-prompt-reset").onclick = () => { if (lastSet) $("k-prompt").value = lastSet.default_prompt; };
@@ -740,7 +772,8 @@ $("k-suffix-reset").onclick = () => { if (lastSet) $("k-suffix").value = lastSet
 $("k-save").onclick = async () => {
   $("k-err").textContent = "";
   try { await api("/api/settings", {method: "PUT", json: {describe_prompt: $("k-prompt").value, prompt_suffix: $("k-suffix").value, image_size: $("k-size").value, target_images: +$("k-target").value,
-    price_per_image: +$("k-price").value, max_usd: +$("k-usd").value, proxy_url: $("k-proxy").value}}); toast("Saved"); loadSettings(); }
+    price_per_image: +$("k-price").value, max_usd: +$("k-usd").value, proxy_url: $("k-proxy").value,
+    style_from: $("k-stylefrom").value, step_delay_sec: +$("k-delay").value, limit_wait_sec: +$("k-lwait").value, limit_retries: +$("k-lret").value}}); toast("Saved"); loadSettings(); }
   catch (e) { $("k-err").textContent = e.message; }
 };
 $("pw-go").onclick = async () => { $("pw-err").textContent = "";

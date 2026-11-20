@@ -85,8 +85,10 @@ func serve() error {
 	if err := os.MkdirAll(env.DataDir, 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(env.SourcesDir(), 0o755); err != nil {
-		return err
+	for _, d := range []string{env.SourcesDir(), env.StylesDir()} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return err
+		}
 	}
 	settings, err := config.OpenSettings(env.DataDir)
 	if err != nil {
@@ -110,6 +112,7 @@ func serve() error {
 		BasePath:   env.BasePath,
 		TrustProxy: env.SSLMode == config.SSLProxy || isLoopback(env.Bind),
 		SourcesDir: env.SourcesDir(),
+		StylesDir:  env.StylesDir(),
 	}, authStore, settings, run, st, logger)
 
 	httpServer := &http.Server{

@@ -65,6 +65,16 @@ type RunConfig struct {
 	TextOnly bool
 	// Suffix is appended to every description.
 	Suffix string
+	// StyleDir holds the Styles box; StyleFrom picks the style pool:
+	// "sources" (default when empty), "styles" or "both".
+	StyleDir  string
+	StyleFrom string
+	// StepDelay waits between steps. LimitWait / LimitRetries: on a rate
+	// limit or quota error, wait LimitWait and try again up to LimitRetries
+	// times (0 = give up at once). Zero LimitWait uses 15s/30s steps.
+	StepDelay    time.Duration
+	LimitWait    time.Duration
+	LimitRetries int
 }
 
 type Runner struct {
@@ -324,21 +334,40 @@ func (r *Runner) loop(ctx context.Context, runID string, cfg RunConfig, eng Engi
 		r.finish(runID, "error", err.Error())
 		return
 	}
-	if len(sources) < 2 {
-		r.finish(runID, "not_enough_sources", "need at least 2 source images")
+	var styleImgs []string
+	if cfg.StyleDir != "" && cfg.StyleFrom != "" && cfg.StyleFrom != "sources" {
+		styleImgs, _ = ListSourceImages(cfg.StyleDir)
+	}
+	var stylePool []string
+	switch cfg.StyleFrom {
+	case "styles":
+		stylePool = styleImgs
+	case "both":
+		stylePool = append(append([]string{}, sources...), styleImgs...)
+	default:
+		stylePool = sources
+	}
+	deck := &pairDeck{contents: sources, styles: stylePool, rng: r.rng}
+	if len(sources) == 0 || deck.size() == 0 {
+		r.finish(runID, "not_enough_sources", "need a source image and a different style image")
 		return
+	}
+	isStyleDir := map[string]bool{}
+	for _, p := range styleImgs {
+		isStyleDir[p] = true
 	}
 	r.logger.Info("run started", "run_id", runID, "sources", len(sources), "target", cfg.Target,
 		"describe", cfg.DescribeModel, "image", cfg.ImageModel)
 	if cfg.TextOnly {
-		r.emit(runID, 0, "info", "Run started: %d source images, target %d descriptions, images off. Describe: %s.",
-			len(sources), cfg.Target, cfg.DescribeModel)
+		r.emit(runID, 0, "info", "Run started: %d source images, %s, target %d descriptions, images off. Describe: %s.",
+			len(sources), styleNote(cfg.StyleFrom, len(stylePool)), cfg.Target, cfg.DescribeModel)
 	} else {
-		r.emit(runID, 0, "info", "Run started: %d source images, target %d images. Describe: %s. Image: %s.",
-			len(sources), cfg.Target, cfg.DescribeModel, cfg.ImageModel)
+		r.emit(runID, 0, "info", "Run started: %d source images, %s, target %d images. Describe: %s. Image: %s.",
+			len(sources), styleNote(cfg.StyleFrom, len(stylePool)), cfg.Target, cfg.DescribeModel, cfg.ImageModel)
 	}
-
-	deck := &pairDeck{items: sources, rng: r.rng}
+	if cfg.StepDelay > 0 || cfg.LimitWait > 0 {
+		r.emit(runID, 0, "info", "Pacing: %s between steps; on a rate limit wait %s and retry, up to %d times.", cfg.StepDelay, cfg.LimitWait, cfg.LimitRetries)
+	}
 	type loaded struct {
 		img   imageprep.Image
 		thumb string
@@ -352,7 +381,11 @@ func (r *Runner) loop(ctx context.Context, runID string, cfg RunConfig, eng Engi
 		if err != nil {
 			return loaded{}, err
 		}
-		thumb, _ := r.store.SaveRunSource(runID, filepath.Base(p), im.Data, im.MIMEType)
+		key := filepath.Base(p)
+		if isStyleDir[p] {
+			key = "style-" + key
+		}
+		thumb, _ := r.store.SaveRunSource(runID, key, im.Data, im.MIMEType)
 		l := loaded{im, thumb}
 		cache[p] = l
 		return l, nil
@@ -383,6 +416,13 @@ func (r *Runner) loop(ctx context.Context, runID string, cfg RunConfig, eng Engi
 			return
 		}
 
+		if rested := step == 0 || cfg.StepDelay <= 0; !rested {
+			r.setPhase(runID, "resting", fmt.Sprintf("%s pause between steps", cfg.StepDelay))
+			if r.rest(ctx, cfg.StepDelay) {
+				r.finish(runID, "stopped_by_user", "")
+				return
+			}
+		}
 		step++
 		pair := deck.next()
 		content, style := filepath.Base(pair[0]), filepath.Base(pair[1])
@@ -449,7 +489,7 @@ func (r *Runner) doStep(ctx context.Context, runID string, step int, cfg RunConf
 	r.setPhase(runID, "describing", cfg.DescribeModel)
 	r.emit(runID, step, "info", "Describing with %s…", cfg.DescribeModel)
 	t0 := time.Now()
-	desc, err := retry(ctx, r.sleepFn, onWait, func() (string, error) {
+	desc, err := retry(ctx, r.sleepFn, cfg.limits(), onWait, func() (string, error) {
 		r.setPhase(runID, "describing", cfg.DescribeModel)
 		return eng.Describer.Describe(ctx, cfg.Prompt, []imageprep.Image{imgA, imgB})
 	})
@@ -483,7 +523,7 @@ func (r *Runner) doStep(ctx context.Context, runID string, step int, cfg RunConf
 	r.setPhase(runID, "drawing", cfg.ImageModel)
 	r.emit(runID, step, "info", "Drawing with %s…", cfg.ImageModel)
 	t1 := time.Now()
-	out, err := retry(ctx, r.sleepFn, onWait, func() (img, error) {
+	out, err := retry(ctx, r.sleepFn, cfg.limits(), onWait, func() (img, error) {
 		r.setPhase(runID, "drawing", cfg.ImageModel)
 		d, m, e := eng.ImageMaker.Make(ctx, desc)
 		return img{d, m}, e
@@ -532,13 +572,55 @@ func shortErr(err error) string {
 	return s
 }
 
-// retry tries fn up to 4 times on temporary errors (2s, 4s, 8s) and up to
-// 3 times on rate limits (15s, 30s) before giving up. onWait (optional) is
-// told about each wait.
-func retry[T any](ctx context.Context, sleep func(context.Context, time.Duration) error, onWait func(time.Duration, error), fn func() (T, error)) (T, error) {
+// limits is the list of waits used on rate-limit errors.
+func (c RunConfig) limits() []time.Duration {
+	if c.LimitWait <= 0 {
+		return []time.Duration{15 * time.Second, 30 * time.Second}
+	}
+	out := make([]time.Duration, c.LimitRetries)
+	for i := range out {
+		out[i] = c.LimitWait
+	}
+	return out
+}
+
+func styleNote(from string, n int) string {
+	switch from {
+	case "styles":
+		return fmt.Sprintf("styles from the Styles box (%d)", n)
+	case "both":
+		return fmt.Sprintf("styles from Sources and Styles (%d)", n)
+	}
+	return "styles from Sources"
+}
+
+// rest waits d between steps, waking early on Stop. It returns true when
+// the run should stop.
+func (r *Runner) rest(ctx context.Context, d time.Duration) bool {
+	end := time.Now().Add(d)
+	for {
+		r.mu.Lock()
+		stop := r.stopReq
+		r.mu.Unlock()
+		if stop || ctx.Err() != nil {
+			return true
+		}
+		left := time.Until(end)
+		if left <= 0 {
+			return false
+		}
+		if err := r.sleepFn(ctx, min(left, 500*time.Millisecond)); err != nil {
+			return true
+		}
+	}
+}
+
+// retry tries fn up to 4 times on temporary errors (2s, 4s, 8s) and once
+// per entry of quotaWait on rate limits before giving up. onWait (optional)
+// is told about each wait.
+func retry[T any](ctx context.Context, sleep func(context.Context, time.Duration) error, quotaWait []time.Duration, onWait func(time.Duration, error), fn func() (T, error)) (T, error) {
 	var zero T
 	tempWait := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
-	quotaWait := []time.Duration{15 * time.Second, 30 * time.Second}
 	ti, qi := 0, 0
 	for {
 		v, err := fn()
@@ -605,24 +687,33 @@ func (r *Runner) finish(runID, reason, lastErr string) {
 	r.emit(runID, 0, lvl, "%s", msg)
 }
 
-// pairDeck deals ordered (content, style) pairs of two different images in
-// random order. Every ordered pair comes up once before any repeats; then
-// the deck is reshuffled.
+// pairDeck deals (content, style) pairs of two different images in random
+// order: content from contents, style from styles. Every pair comes up once
+// before any repeats; then the deck is reshuffled.
 type pairDeck struct {
-	items []string
-	rng   *rand.Rand
-	deck  [][2]string
+	contents []string
+	styles   []string
+	rng      *rand.Rand
+	deck     [][2]string
 }
+
+func (d *pairDeck) all() [][2]string {
+	var out [][2]string
+	for _, c := range d.contents {
+		for _, s := range d.styles {
+			if c != s {
+				out = append(out, [2]string{c, s})
+			}
+		}
+	}
+	return out
+}
+
+func (d *pairDeck) size() int { return len(d.all()) }
 
 func (d *pairDeck) next() [2]string {
 	if len(d.deck) == 0 {
-		for i := range d.items {
-			for j := range d.items {
-				if i != j {
-					d.deck = append(d.deck, [2]string{d.items[i], d.items[j]})
-				}
-			}
-		}
+		d.deck = d.all()
 		d.rng.Shuffle(len(d.deck), func(i, j int) { d.deck[i], d.deck[j] = d.deck[j], d.deck[i] })
 	}
 	p := d.deck[len(d.deck)-1]

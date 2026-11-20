@@ -34,6 +34,7 @@ type Options struct {
 	BasePath   string
 	TrustProxy bool // honour X-Forwarded-Proto / X-Forwarded-For (behind a reverse proxy)
 	SourcesDir string
+	StylesDir  string
 }
 
 type Server struct {
@@ -89,7 +90,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/pick", a(s.handlePick))
 	mux.HandleFunc("POST /api/reject", a(s.handleReject))
 	mux.HandleFunc("GET /api/sources", a(s.handleListDir(s.opt.SourcesDir)))
-	mux.HandleFunc("POST /api/sources", a(s.handleUpload))
+	mux.HandleFunc("POST /api/sources", a(s.handleUpload(s.opt.SourcesDir)))
+	mux.HandleFunc("GET /api/styles", a(s.handleListDir(s.opt.StylesDir)))
+	mux.HandleFunc("POST /api/styles", a(s.handleUpload(s.opt.StylesDir)))
+	mux.HandleFunc("DELETE /api/styles", a(s.handleDeleteIn(s.opt.StylesDir)))
+	mux.HandleFunc("GET /api/styles/file", a(s.handleFileIn(s.opt.StylesDir)))
 	mux.HandleFunc("DELETE /api/sources", a(s.handleDeleteIn(s.opt.SourcesDir)))
 	mux.HandleFunc("GET /api/sources/file", a(s.handleFileIn(s.opt.SourcesDir)))
 	mux.HandleFunc("GET /api/picked", a(s.handleListDir(s.store.PickedDir())))
@@ -364,8 +369,19 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	srcs, _ := store.ListImages(s.opt.SourcesDir)
-	if len(srcs) < 2 {
-		writeErr(w, http.StatusBadRequest, "upload at least 2 source images first")
+	stys, _ := store.ListImages(s.opt.StylesDir)
+	switch {
+	case len(srcs) == 0:
+		writeErr(w, http.StatusBadRequest, "upload source images first (they give the subject)")
+		return
+	case set.StyleFrom == config.StyleFromStyles && len(stys) == 0:
+		writeErr(w, http.StatusBadRequest, "style images come from Styles, but Styles is empty")
+		return
+	case set.StyleFrom == config.StyleFromSources && len(srcs) < 2:
+		writeErr(w, http.StatusBadRequest, "upload at least 2 source images, or add Styles")
+		return
+	case set.StyleFrom == config.StyleFromBoth && len(srcs)+len(stys) < 2:
+		writeErr(w, http.StatusBadRequest, "upload at least 2 images across Sources and Styles")
 		return
 	}
 	rc := runner.RunConfig{
@@ -373,6 +389,10 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		PricePerImage: set.PricePerImage, MaxUSD: set.MaxUSD,
 		Prompt: set.DescribePrompt, DescribeModel: dLabel, ImageModel: iLabel, ImageSize: set.ImageSize,
 		TextOnly: set.TextOnly, Suffix: set.PromptSuffix,
+		StyleDir: s.opt.StylesDir, StyleFrom: set.StyleFrom,
+		StepDelay:    time.Duration(set.StepDelaySec) * time.Second,
+		LimitWait:    time.Duration(set.LimitWaitSec) * time.Second,
+		LimitRetries: set.LimitRetries,
 	}
 	if req.Target > 0 {
 		rc.Target = min(req.Target, 10000)
@@ -554,7 +574,11 @@ func (s *Server) handleDeleteIn(dir string) http.HandlerFunc {
 	}
 }
 
-func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleUpload(dir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { s.upload(dir, w, r) }
+}
+
+func (s *Server) upload(dir string, w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBody)
 	mr, err := r.MultipartReader()
 	if err != nil {
@@ -581,7 +605,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			part.Close()
 			continue
 		}
-		name, err := store.SaveSource(s.opt.SourcesDir, part.FileName(), part)
+		name, err := store.SaveSource(dir, part.FileName(), part)
 		part.Close()
 		if err != nil {
 			errs = append(errs, part.FileName()+": "+err.Error())
@@ -615,6 +639,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		DescribePrompt *string  `json:"describe_prompt"`
 		PromptSuffix   *string  `json:"prompt_suffix"`
 		TextOnly       *bool    `json:"text_only"`
+		StyleFrom      *string  `json:"style_from"`
+		StepDelaySec   *int     `json:"step_delay_sec"`
+		LimitWaitSec   *int     `json:"limit_wait_sec"`
+		LimitRetries   *int     `json:"limit_retries"`
 		ImageSize      *string  `json:"image_size"`
 		TargetImages   *int     `json:"target_images"`
 		PricePerImage  *float64 `json:"price_per_image"`
@@ -633,6 +661,18 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.TextOnly != nil {
 			c.TextOnly = *req.TextOnly
+		}
+		if req.StyleFrom != nil {
+			c.StyleFrom = *req.StyleFrom
+		}
+		if req.StepDelaySec != nil {
+			c.StepDelaySec = *req.StepDelaySec
+		}
+		if req.LimitWaitSec != nil {
+			c.LimitWaitSec = *req.LimitWaitSec
+		}
+		if req.LimitRetries != nil {
+			c.LimitRetries = *req.LimitRetries
 		}
 		if req.ImageSize != nil {
 			c.ImageSize = *req.ImageSize

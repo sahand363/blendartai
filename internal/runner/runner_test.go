@@ -158,7 +158,7 @@ func TestNeedsTwoSources(t *testing.T) {
 }
 
 func TestPairDeckOrderedNoSelf(t *testing.T) {
-	d := &pairDeck{items: []string{"a", "b", "c"}, rng: New(nil, nil).rng}
+	d := &pairDeck{contents: []string{"a", "b", "c"}, styles: []string{"a", "b", "c"}, rng: New(nil, nil).rng}
 	seen := map[[2]string]int{}
 	for i := 0; i < 6; i++ {
 		p := d.next()
@@ -248,5 +248,50 @@ func TestTextOnly(t *testing.T) {
 		if x.Status != "done" || x.Image != "" || x.Description != "a cat painted in watercolor Pure black background." {
 			t.Fatalf("step %+v", x)
 		}
+	}
+}
+
+func TestStylesBox(t *testing.T) {
+	r, src, st := setup(t, 2)
+	sty := filepath.Join(t.TempDir(), "styles")
+	os.MkdirAll(sty, 0o755)
+	os.WriteFile(filepath.Join(sty, "s1.png"), []byte{9}, 0o644)
+	os.WriteFile(filepath.Join(sty, "s2.png"), []byte{8}, 0o644)
+	cfg := RunConfig{SourceDir: src, StyleDir: sty, StyleFrom: "styles", Target: 4, Prompt: "x", TextOnly: true}
+	if _, err := r.Start(cfg, Engine{Describer: &fakeDesc{}, Load: fakeLoad}); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	steps, _ := st.ListSteps(r.Status().RunID)
+	if len(steps) != 4 {
+		t.Fatalf("steps %d %+v", len(steps), r.Status())
+	}
+	seen := map[string]bool{}
+	for _, x := range steps {
+		if x.Style != "s1.png" && x.Style != "s2.png" || x.Content != "a.png" && x.Content != "b.png" {
+			t.Fatalf("bad pair %s + %s", x.Content, x.Style)
+		}
+		seen[x.Content+x.Style] = true
+	}
+	if len(seen) != 4 {
+		t.Fatalf("pairs repeated before deck ran out: %v", seen)
+	}
+}
+
+func TestLimitWaits(t *testing.T) {
+	r, src, _ := setup(t, 3)
+	var waits atomic.Int32
+	r.sleepFn = func(ctx context.Context, d time.Duration) error {
+		if d == 90*time.Second {
+			waits.Add(1)
+		}
+		return ctx.Err()
+	}
+	d := &fakeDesc{err: &providers.APIError{Status: 429, Body: "rate limit"}}
+	cfg := RunConfig{SourceDir: src, Target: 2, Prompt: "x", TextOnly: true, LimitWait: 90 * time.Second, LimitRetries: 4}
+	r.Start(cfg, Engine{Describer: d, Load: fakeLoad})
+	r.Wait()
+	if s := r.Status(); s.StopReason != "quota_exhausted" || waits.Load() != 4 || d.calls.Load() != 5 {
+		t.Fatalf("reason %s waits %d calls %d", s.StopReason, waits.Load(), d.calls.Load())
 	}
 }

@@ -99,6 +99,7 @@ func (e Env) TLS() bool {
 }
 
 func (e Env) SourcesDir() string { return filepath.Join(e.DataDir, "sources") }
+func (e Env) StylesDir() string  { return filepath.Join(e.DataDir, "styles") }
 
 func NormalizeBasePath(p string) string {
 	p = strings.TrimSpace(p)
@@ -166,6 +167,12 @@ const oldDefaultPrompt = `You are given two images. The FIRST image is the conte
 
 Write ONE detailed image-generation prompt, a single paragraph of 80 to 160 words, that recreates the content of the first image rendered entirely in the visual style of the second image. Describe the style in concrete visual terms. Do not mention "first image", "second image", "reference", "photo of", or any artist names. Output only the prompt text.`
 
+const (
+	StyleFromSources = "sources"
+	StyleFromStyles  = "styles"
+	StyleFromBoth    = "both"
+)
+
 // Settings is what the panel edits.
 type Settings struct {
 	Providers      []Provider `json:"providers"`
@@ -176,7 +183,16 @@ type Settings struct {
 	// model draws). Empty means nothing is added.
 	PromptSuffix string `json:"prompt_suffix"`
 	// TextOnly skips drawing: a run only writes descriptions.
-	TextOnly     bool   `json:"text_only"`
+	TextOnly bool `json:"text_only"`
+	// StyleFrom says where the second (style) image comes from: "sources",
+	// "styles" or "both". The first (content) image always comes from Sources.
+	StyleFrom string `json:"style_from"`
+	// Pacing. StepDelaySec waits between steps. When a provider says "too
+	// many requests" / quota, the call waits LimitWaitSec and tries again,
+	// up to LimitRetries times, before the run stops.
+	StepDelaySec int    `json:"step_delay_sec"`
+	LimitWaitSec int    `json:"limit_wait_sec"`
+	LimitRetries int    `json:"limit_retries"`
 	ImageSize    string `json:"image_size"` // 1K, 2K, 4K or WxH
 	TargetImages int    `json:"target_images"`
 	// Optional spend guard: PricePerImage > 0 and MaxUSD > 0 stop the run
@@ -191,6 +207,9 @@ func DefaultSettings() Settings {
 		Providers:      []Provider{},
 		DescribePrompt: DefaultDescribePrompt,
 		PromptSuffix:   DefaultPromptSuffix,
+		StyleFrom:      StyleFromBoth,
+		LimitWaitSec:   60,
+		LimitRetries:   3,
 		ImageSize:      "1K",
 		TargetImages:   100,
 	}
@@ -209,6 +228,11 @@ func (s *Settings) Validate() error {
 	s.ImageSize = strings.TrimSpace(s.ImageSize)
 	s.ProxyURL = strings.TrimSpace(s.ProxyURL)
 	s.PromptSuffix = strings.TrimSpace(s.PromptSuffix)
+	switch s.StyleFrom {
+	case StyleFromSources, StyleFromStyles, StyleFromBoth:
+	default:
+		s.StyleFrom = StyleFromBoth
+	}
 	if strings.TrimSpace(s.DescribePrompt) == "" || s.DescribePrompt == oldDefaultPrompt {
 		s.DescribePrompt = DefaultDescribePrompt
 	}
@@ -221,6 +245,12 @@ func (s *Settings) Validate() error {
 		return errors.New("price per image must be between 0 and 10")
 	case s.MaxUSD < 0 || s.MaxUSD > 10000:
 		return errors.New("max USD must be between 0 and 10000")
+	case s.StepDelaySec < 0 || s.StepDelaySec > 3600:
+		return errors.New("pause between steps must be 0 to 3600 seconds")
+	case s.LimitWaitSec < 5 || s.LimitWaitSec > 3600:
+		return errors.New("wait on a rate limit must be 5 to 3600 seconds")
+	case s.LimitRetries < 0 || s.LimitRetries > 100:
+		return errors.New("rate-limit retries must be 0 to 100")
 	case len(s.PromptSuffix) > 2000:
 		return errors.New("text added to every description is too long")
 	case len(s.DescribePrompt) > 8000:
