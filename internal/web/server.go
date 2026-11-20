@@ -84,6 +84,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/models/draw", a(s.handleDrawTest))
 	mux.HandleFunc("GET /api/events", a(s.handleEvents))
 	mux.HandleFunc("GET /api/steps", a(s.handleSteps))
+	mux.HandleFunc("POST /api/steps/delete", a(s.handleDeleteSteps))
 	mux.HandleFunc("GET /api/runs", a(s.handleRuns))
 	mux.HandleFunc("DELETE /api/runs", a(s.handleDeleteRun))
 	mux.HandleFunc("GET /api/image", a(s.handleImage))
@@ -460,6 +461,49 @@ func (s *Server) handleSteps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"run": id, "steps": steps})
+}
+
+func (s *Server) handleDeleteSteps(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Run  string   `json:"run"`
+		Dirs []string `json:"dirs"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if len(req.Dirs) == 0 || len(req.Dirs) > 10000 {
+		writeErr(w, http.StatusBadRequest, "nothing selected")
+		return
+	}
+	live := s.runner.Running() && s.runner.Status().RunID == req.Run
+	busy := map[string]bool{}
+	if live {
+		steps, _ := s.store.ListSteps(req.Run)
+		for _, st := range steps {
+			switch st.Status {
+			case "done", "failed", "rejected":
+			default:
+				busy[st.Dir] = true
+			}
+		}
+	}
+	deleted, skipped := 0, 0
+	for _, d := range req.Dirs {
+		if busy[d] {
+			skipped++
+			continue
+		}
+		if err := s.store.DeleteStep(req.Run, d); err != nil {
+			if errors.Is(err, store.ErrPathTraversal) {
+				writeStoreErr(w, err)
+				return
+			}
+			skipped++
+			continue
+		}
+		deleted++
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted, "skipped": skipped})
 }
 
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {

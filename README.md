@@ -10,11 +10,9 @@ On an Ubuntu/Debian server (amd64 or arm64), as root:
 bash <(curl -fsSL https://raw.githubusercontent.com/sahand363/blendartai/main/scripts/install.sh)
 ```
 
-The installer asks for a port (default 2096) and an optional domain, then picks HTTPS on its own:
+The installer asks for a port (default 2096), starts the panel on plain HTTP and opens the SSH menu.
 
-- a certificate that already exists for the domain (certbot, x-ui) is reused,
-- otherwise Let's Encrypt, but only when port 80 is free or the panel is on 443 (it never takes a port from nginx, x-ui or anything else),
-- otherwise a self-signed certificate.
+SSL is added only from the menu (`sudo blendartai`, option 7 SSL / domain): reuse a certificate already on the server (certbot, x-ui), Let's Encrypt (only when port 80 is free or the panel is on 443; it never takes a port from another program), self-signed, your own certificate files, or a reverse proxy.
 
 It prints the panel address and a one-time **setup code**. Open the panel, enter the code and create your admin login.
 

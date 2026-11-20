@@ -70,7 +70,8 @@ ssl_menu() {
   echo "2) Self-signed HTTPS (works on an IP, browser shows a warning)"
   echo "3) Behind a reverse proxy (nginx, Caddy): plain HTTP on 127.0.0.1"
   echo "4) Certificate files I give"
-  echo "5) Off (plain HTTP, not recommended)"
+  echo "5) Off (plain HTTP)"
+  echo "0) Back"
   local c d e crt key; read -r -p "Choose: " c </dev/tty
   case "$c" in
     1) read -r -p "Domain: " d </dev/tty; [ -n "$d" ] || return
@@ -153,11 +154,18 @@ esac
 while true; do
   header
   cat <<M
- 1) Start            2) Stop            3) Restart
- 4) Panel login info 5) Reset admin password
- 6) Change port      7) SSL / domain
- 8) Live logs        9) Update         10) Roll back
-11) Uninstall        0) Exit
+  1) Start
+  2) Stop
+  3) Restart
+  4) Panel login info
+  5) Reset admin password
+  6) Change port
+  7) SSL / domain
+  8) Live logs
+  9) Update
+ 10) Roll back
+ 11) Uninstall
+  0) Exit
 M
   read -r -p "Choose: " c </dev/tty || exit 0
   echo

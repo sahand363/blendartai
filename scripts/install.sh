@@ -65,22 +65,8 @@ if [ ! -f "$ENVF" ]; then
     [ "$YES" = 1 ] && die "port $PORT is busy"
     PORT=$(ask "Pick another port" $((PORT+1)))
   done
-  DOMAIN=$(ask "Domain pointing to this server (empty = use the IP)" "")
-  SSL=selfsigned; EMAIL=""; CERT=""; KEY=""
-  if [ -n "$DOMAIN" ]; then
-    # Reuse an existing certificate (certbot, x-ui, ...) before asking Let's Encrypt.
-    for d in "/etc/letsencrypt/live/$DOMAIN" "/root/cert/$DOMAIN" "/root/cert"; do
-      if [ -f "$d/fullchain.pem" ] && [ -f "$d/privkey.pem" ]; then CERT="$d/fullchain.pem"; KEY="$d/privkey.pem"; break; fi
-    done
-    if [ -n "$CERT" ]; then
-      SSL=files; say "Using the existing certificate in $(dirname "$CERT")"
-    elif [ "$PORT" = 443 ] || ! port_busy 80; then
-      SSL=letsencrypt; EMAIL=$(ask "Email for Let's Encrypt (optional)" "")
-      say "Let's Encrypt will issue a certificate for $DOMAIN"
-    else
-      warn "port 80 belongs to $(port_owner 80 || echo another program) and is left alone; using a self-signed certificate"
-    fi
-  fi
+  # Plain HTTP on first install. Add SSL later from the menu: sudo blendartai -> SSL / domain.
+  SSL=off; DOMAIN=""; EMAIL=""; CERT=""; KEY=""
   mkdir -p "$ETC"; chmod 700 "$ETC"
   cat > "$ENVF" <<ENV
 # Blendartai server settings. Edit with: sudo blendartai
@@ -135,8 +121,9 @@ echo
 echo "${c_ok}Blendartai $VERSION is running.${c_0}"
 BLENDARTAI_FROM_INSTALL=1 "$MENU" info || true
 echo
-echo "Manage it any time with: ${c_b}sudo blendartai${c_0}"
-if [ "$FRESH" = 1 ] && [ "$YES" = 0 ] && [ -t 1 ]; then
-  read -r -p "Open the menu now? [Y/n]: " a </dev/tty || true
-  case "${a:-y}" in [Yy]*) exec "$MENU" ;; esac
+echo "Manage it any time with: ${c_b}sudo blendartai${c_0}  (SSL / domain is option 7)"
+# Interactive installs land in the menu. Updates from the menu (--yes) go back to it on their own.
+if [ "$YES" = 0 ] && ( : </dev/tty ) 2>/dev/null; then
+  sleep 1
+  exec "$MENU" </dev/tty >/dev/tty 2>&1
 fi

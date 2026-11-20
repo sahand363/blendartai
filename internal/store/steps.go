@@ -83,6 +83,19 @@ func (s *Store) ListSteps(runID string) ([]StepRecord, error) {
 	return out, nil
 }
 
+// DeleteStep removes one step folder (its description, and its image if
+// one was made). Picked copies are kept.
+func (s *Store) DeleteStep(runID, dir string) error {
+	if !isSafeSegment(runID) || !isSafeSegment(dir) || dir == "sources" || dir == "rejected" {
+		return ErrPathTraversal
+	}
+	full := filepath.Join(s.runsDir, runID, dir)
+	if _, err := os.Stat(filepath.Join(full, "step.json")); err != nil {
+		return os.ErrNotExist
+	}
+	return os.RemoveAll(full)
+}
+
 // SaveRunSource keeps a copy of a (shrunk) source image inside the run, so
 // the run still shows which images it mixed after the sources change.
 // It returns the path relative to the run.

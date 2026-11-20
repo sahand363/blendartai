@@ -94,6 +94,7 @@ main{max-width:1300px;margin:0 auto;padding:18px 16px 60px}
 .sw input:checked+i{background:var(--accent2)}.sw input:checked+i:after{left:21px}
 .pipe div.skip{opacity:.35;text-decoration:line-through}
 .feed{display:flex;flex-direction:column;gap:12px}
+.card.step.sel{border-color:var(--accent)}
 .step{display:grid;grid-template-columns:minmax(260px,420px) 1fr;gap:16px}
 .step .desc{white-space:pre-wrap;font-size:13px;line-height:1.55}
 .step .meta{font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -220,6 +221,11 @@ code{background:#10131a;padding:2px 6px;border-radius:6px}
     <button id="f-refresh">Refresh</button>
     <button id="f-copyall">Copy all</button>
     <button id="f-dl">Download .txt</button>
+  </div>
+  <div class="row" style="margin-bottom:10px;align-items:center">
+    <label style="display:flex;gap:8px;align-items:center;margin:0;flex:0 0 auto;cursor:pointer"><input type="checkbox" id="f-all" style="width:auto"> Select all</label>
+    <button id="f-del" class="danger" disabled style="flex:0 0 auto">Delete selected</button>
+    <span class="muted" style="font-size:12px">Deleting a description also deletes its image, if one was made. Picked copies stay.</span>
   </div>
   <div class="muted" id="f-count" style="margin-bottom:10px;font-size:13px"></div>
   <div class="feed" id="f-body"></div>
@@ -527,7 +533,7 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => { if (e.key === "Escape") $("vw").classList.add("hidden"); });
 
 // ---------- descriptions feed ----------
-let feedRuns = [], feedSteps = [];
+let feedRuns = [], feedSteps = [], feedSel = new Set(), feedSelRun = "";
 const allDescs = () => feedSteps.filter(x => x.description).slice().sort((a, b) => a.step - b.step).map(x => x.description.trim());
 $("f-copyall").onclick = async () => { const t = allDescs(); if (!t.length) return toast("No descriptions yet");
   try { await navigator.clipboard.writeText(t.join("\n\n")); toast("Copied " + t.length + " descriptions"); } catch (_) { toast("Copy failed, use Download"); } };
@@ -550,27 +556,51 @@ async function loadFeed() {
   let d; try { d = await api("/api/steps?run=" + enc(run)); } catch (e) { $("f-body").innerHTML = '<p class="err">' + esc(e.message) + "</p>"; return; }
   const f = $("f-filter").value;
   const steps = d.steps.filter(x => !f || x.status === f);
+  if (feedSelRun !== run) { feedSel = new Set(); feedSelRun = run; }
+  const have = new Set(d.steps.map(x => x.dir)); [...feedSel].forEach(x => { if (!have.has(x)) feedSel.delete(x); });
+  feedShown = steps.map(x => x.dir);
   const done = d.steps.filter(x => x.status === "done").length, failed = d.steps.filter(x => x.status === "failed").length;
   feedSteps = d.steps;
   const nimg = d.steps.filter(x => x.image).length, ndesc = d.steps.filter(x => x.description).length;
   $("f-count").textContent = d.steps.length + " steps · " + ndesc + " descriptions · " + (d.steps.some(x => x.image_model) ? nimg + " images" : "images off") + " · " + failed + " failed" + (feedLive() ? " · live, updates every few seconds" : "");
   $("f-body").innerHTML = steps.map(st => {
     const secs = (st.describe_ms ? "described in " + (st.describe_ms / 1000).toFixed(1) + "s" : "") + (st.draw_ms ? " · drawn in " + (st.draw_ms / 1000).toFixed(1) + "s" : "");
-    return '<div class="card step"><div><div class="duo">' +
+    const box = '<input type="checkbox" style="width:auto;margin:0" data-sel="' + esc(st.dir) + '"' + (feedSel.has(st.dir) ? " checked" : "") + ">";
+    return '<div class="card step' + (feedSel.has(st.dir) ? " sel" : "") + '"><div><div class="duo">' +
       '<figure>' + thumbHTML(run, st.content_thumb, "Content: " + st.content) + '<figcaption title="' + esc(st.content) + '">Content: ' + esc(st.content) + '</figcaption></figure><span class="arrow">+</span>' +
       '<figure>' + thumbHTML(run, st.style_thumb, "Style: " + st.style) + '<figcaption title="' + esc(st.style) + '">Style: ' + esc(st.style) + '</figcaption></figure><span class="arrow">→</span>' +
       '<figure>' + (st.image ? thumbHTML(run, st.image, "Step " + st.step + " result") : '<div class="ph">' + esc(st.status === "failed" ? "no image" : st.status === "rejected" ? "rejected" : st.status === "done" && !st.image_model ? "text only" : st.status + "…") + "</div>") +
       '<figcaption>Result' + (st.image ? ' · <a href="#" data-keep="' + esc(st.image) + '">Keep</a>' : "") + "</figcaption></figure></div></div>" +
-      '<div><div class="meta"><b style="color:var(--text)">Step ' + st.step + '</b><span class="pill ' + esc(st.status) + '">' + esc(st.status) + "</span><span>" + esc(new Date(st.started_at).toLocaleTimeString()) + "</span><span>" + esc(secs) + "</span>" +
-      (st.description ? '<button style="padding:3px 9px;font-size:12px" data-copy="' + st.step + '">Copy</button>' : "") + "</div>" +
+      '<div><div class="meta">' + box + '<b style="color:var(--text)">Step ' + st.step + '</b><span class="pill ' + esc(st.status) + '">' + esc(st.status) + "</span><span>" + esc(new Date(st.started_at).toLocaleTimeString()) + "</span><span>" + esc(secs) + "</span>" +
+      (st.description ? '<button style="padding:3px 9px;font-size:12px" data-copy="' + st.step + '">Copy</button>' : "") +
+      '<button class="danger" style="padding:3px 9px;font-size:12px" data-delone="' + esc(st.dir) + '">Delete</button>' + "</div>" +
       (st.description ? '<div class="desc" id="desc-' + st.step + '">' + esc(st.description) + "</div>" : '<div class="muted">' + (st.status === "describing" ? "Writing the description…" : "No description.") + "</div>") +
       (st.error ? '<div class="err">' + esc(st.error) + "</div>" : "") +
       '<div class="muted" style="font-size:11px;margin-top:8px">' + esc(st.describe_model || "") + (st.image_model ? " → " + esc(st.image_model) : " · images off") + "</div></div></div>";
   }).join("") || '<p class="muted">No steps match.</p>';
+  feedSelUI();
 }
+let feedShown = [];
+function feedSelUI() {
+  const n = feedSel.size;
+  $("f-del").disabled = !n; $("f-del").textContent = n ? "Delete selected (" + n + ")" : "Delete selected";
+  $("f-all").checked = feedShown.length > 0 && feedShown.every(x => feedSel.has(x));
+}
+async function feedDelete(dirs) {
+  try {
+    const r = await api("/api/steps/delete", {method: "POST", json: {run: $("f-run").value, dirs}});
+    dirs.forEach(x => feedSel.delete(x));
+    toast(r.deleted + " deleted" + (r.skipped ? ", " + r.skipped + " still in progress, kept" : ""));
+  } catch (e) { alert(e.message); }
+  loadFeed();
+}
+$("f-all").onchange = () => { feedShown.forEach(x => $("f-all").checked ? feedSel.add(x) : feedSel.delete(x)); loadFeed(); };
+$("f-del").onclick = () => { const dirs = [...feedSel]; if (dirs.length && confirm("Delete " + dirs.length + " description" + (dirs.length > 1 ? "s" : "") + "? This can't be undone.")) feedDelete(dirs); };
 $("f-run").onchange = loadFeed; $("f-filter").onchange = loadFeed; $("f-refresh").onclick = loadFeedRuns;
 $("f-body").onclick = async e => {
   const d = e.target.dataset;
+  if (d.sel !== undefined && e.target.type === "checkbox") { e.target.checked ? feedSel.add(d.sel) : feedSel.delete(d.sel); e.target.closest(".card").classList.toggle("sel", e.target.checked); feedSelUI(); return; }
+  if (d.delone) { if (confirm("Delete this description?")) feedDelete([d.delone]); return; }
   if (d.copy) { try { await navigator.clipboard.writeText($("desc-" + d.copy).textContent); toast("Copied"); } catch (_) { toast("Copy failed"); } }
   if (d.keep) { e.preventDefault(); try { await api("/api/pick", {method: "POST", json: {run: $("f-run").value, path: d.keep}}); toast("Kept"); } catch (err) { toast(err.message); } }
 };
