@@ -1,0 +1,46 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -s -l .)" || (gofmt -s -l . && exit 1)
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: bash -n scripts/install.sh && bash -n scripts/blendartai.sh
+      - name: build
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF" == refs/tags/v* ]] || VERSION="dev-${GITHUB_SHA::7}"
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" \
+              -o dist/blendartai-linux-$arch ./cmd/blendartai
+          done
+          cp scripts/blendartai.sh dist/
+          cd dist && sha256sum blendartai-linux-* blendartai.sh > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blendartai
+          path: dist/*
+      - name: release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

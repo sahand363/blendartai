@@ -15,25 +15,35 @@ import (
 var ErrPathTraversal = errors.New("invalid path")
 
 type RunState struct {
-	RunID       string    `json:"run_id"`
-	Status      string    `json:"status"`
-	ImagesDone  int       `json:"images_done"`
-	PairsDone   int       `json:"pairs_done"`
-	EstSpendUSD float64   `json:"est_spend_usd"`
-	CurrentPair string    `json:"current_pair,omitempty"`
-	StopReason  string    `json:"stop_reason,omitempty"`
-	LastError   string    `json:"last_error,omitempty"`
-	StartedAt   time.Time `json:"started_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	RunID         string    `json:"run_id"`
+	Status        string    `json:"status"`
+	ImagesDone    int       `json:"images_done"`
+	PairsDone     int       `json:"pairs_done"`
+	EstSpendUSD   float64   `json:"est_spend_usd"`
+	MaxImages     int       `json:"max_images,omitempty"`
+	MaxUSD        float64   `json:"max_usd,omitempty"`
+	Steps         int       `json:"steps"`
+	Descriptions  int       `json:"descriptions"`
+	Errors        int       `json:"errors"`
+	DescribeModel string    `json:"describe_model,omitempty"`
+	ImageModel    string    `json:"image_model,omitempty"`
+	CurrentPair   string    `json:"current_pair,omitempty"`
+	StopReason    string    `json:"stop_reason,omitempty"`
+	LastError     string    `json:"last_error,omitempty"`
+	StartedAt     time.Time `json:"started_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type ImageMeta struct {
-	SourceFiles []string  `json:"source_files"`
-	Prompt      string    `json:"prompt"`
-	Model       string    `json:"model"`
-	Size        string    `json:"size"`
-	Timestamp   time.Time `json:"timestamp"`
-	EstCostUSD  float64   `json:"est_cost_usd"`
+	SourceFiles   []string  `json:"source_files"`
+	ContentImage  string    `json:"content_image,omitempty"`
+	StyleImage    string    `json:"style_image,omitempty"`
+	DescribeModel string    `json:"describe_model,omitempty"`
+	Prompt        string    `json:"prompt"`
+	Model         string    `json:"model"`
+	Size          string    `json:"size"`
+	Timestamp     time.Time `json:"timestamp"`
+	EstCostUSD    float64   `json:"est_cost_usd"`
 }
 
 type GalleryImage struct {
@@ -95,7 +105,7 @@ func (s *Store) PairDir(runID string, pairIndex int, srcA, srcB string) (string,
 	if !isSafeSegment(runID) {
 		return "", ErrPathTraversal
 	}
-	name := fmt.Sprintf("%02d_%s__%s", pairIndex, sanitizeName(srcA), sanitizeName(srcB))
+	name := fmt.Sprintf("%03d_%s__%s", pairIndex, sanitizeName(srcA), sanitizeName(srcB))
 	dir := filepath.Join(s.runsDir, runID, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err

@@ -1,0 +1,184 @@
+package runner
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/sahand363/blendartai/internal/imageprep"
+	"github.com/sahand363/blendartai/internal/providers"
+	"github.com/sahand363/blendartai/internal/store"
+)
+
+type fakeDesc struct {
+	calls atomic.Int32
+	err   error
+	gate  chan struct{}
+}
+
+func (f *fakeDesc) Describe(ctx context.Context, instr string, imgs []imageprep.Image) (string, error) {
+	f.calls.Add(1)
+	if f.gate != nil {
+		select {
+		case <-f.gate:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	if f.err != nil {
+		return "", f.err
+	}
+	if len(imgs) != 2 || string(imgs[0].Data) == string(imgs[1].Data) {
+		return "", errors.New("want two different images")
+	}
+	return "a cat painted in watercolor", nil
+}
+
+type fakeMaker struct{ prompts atomic.Int32 }
+
+func (f *fakeMaker) Make(ctx context.Context, prompt string) ([]byte, string, error) {
+	f.prompts.Add(1)
+	if prompt != "a cat painted in watercolor" {
+		return nil, "", errors.New("image model got the wrong prompt")
+	}
+	return []byte("\x89PNG\r\n\x1a\nfake"), "image/png", nil
+}
+
+func setup(t *testing.T, n int) (*Runner, string, *store.Store) {
+	t.Helper()
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	os.MkdirAll(src, 0o755)
+	for i := 0; i < n; i++ {
+		os.WriteFile(filepath.Join(src, string(rune('a'+i))+".png"), []byte{byte(i)}, 0o644)
+	}
+	st, err := store.New(filepath.Join(root, "out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := New(st, nil)
+	r.sleepFn = func(ctx context.Context, d time.Duration) error { return ctx.Err() }
+	return r, src, st
+}
+
+func fakeLoad(p string) (imageprep.Image, error) {
+	return imageprep.Image{Data: []byte(filepath.Base(p)), MIMEType: "image/png"}, nil
+}
+
+func TestRunReachesTarget(t *testing.T) {
+	r, src, st := setup(t, 4)
+	d, m := &fakeDesc{}, &fakeMaker{}
+	if _, err := r.Start(RunConfig{SourceDir: src, Target: 7, PricePerImage: 0.04, Prompt: "x"}, Engine{Describer: d, ImageMaker: m, Load: fakeLoad}); err != nil {
+		t.Fatal(err)
+	}
+	r.Wait()
+	s := r.Status()
+	if s.StopReason != "target_reached" || s.ImagesDone != 7 || s.Descriptions != 7 {
+		t.Fatalf("got %+v", s)
+	}
+	runs, _ := st.ListRuns()
+	if len(runs) != 1 || len(runs[0].Pairs) != 7 {
+		t.Fatalf("want 7 saved steps, got %+v", runs)
+	}
+	f, err := st.ResolveRunFile(s.RunID, runs[0].Pairs[0].Name+"/description.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(f); err != nil || len(b) == 0 {
+		t.Fatalf("description not saved: %v", err)
+	}
+}
+
+func TestSpendGuard(t *testing.T) {
+	r, src, _ := setup(t, 3)
+	r.Start(RunConfig{SourceDir: src, Target: 100, PricePerImage: 0.5, MaxUSD: 1.2}, Engine{Describer: &fakeDesc{}, ImageMaker: &fakeMaker{}, Load: fakeLoad})
+	r.Wait()
+	if s := r.Status(); s.StopReason != "max_usd_reached" || s.ImagesDone != 2 {
+		t.Fatalf("got %+v", s)
+	}
+}
+
+func TestQuotaStops(t *testing.T) {
+	r, src, _ := setup(t, 3)
+	d := &fakeDesc{err: &providers.APIError{Status: 429, Body: "quota"}}
+	r.Start(RunConfig{SourceDir: src, Target: 10}, Engine{Describer: d, ImageMaker: &fakeMaker{}, Load: fakeLoad})
+	r.Wait()
+	if s := r.Status(); s.StopReason != "quota_exhausted" {
+		t.Fatalf("got %+v", s)
+	}
+}
+
+func TestTooManyErrors(t *testing.T) {
+	r, src, _ := setup(t, 3)
+	d := &fakeDesc{err: &providers.APIError{Status: 400, Body: "bad"}}
+	r.Start(RunConfig{SourceDir: src, Target: 10}, Engine{Describer: d, ImageMaker: &fakeMaker{}, Load: fakeLoad})
+	r.Wait()
+	if s := r.Status(); s.StopReason != "too_many_errors" || s.Errors != MaxConsecutiveErrors {
+		t.Fatalf("got %+v", s)
+	}
+}
+
+func TestPauseResumeStop(t *testing.T) {
+	r, src, _ := setup(t, 3)
+	d := &fakeDesc{gate: make(chan struct{})}
+	r.Start(RunConfig{SourceDir: src, Target: 50}, Engine{Describer: d, ImageMaker: &fakeMaker{}, Load: fakeLoad})
+	waitFor(t, func() bool { return d.calls.Load() >= 1 }) // a step is in flight
+	if err := r.Pause(); err != nil {
+		t.Fatal(err)
+	}
+	d.gate <- struct{}{} // finish the step in flight
+	waitFor(t, func() bool { return r.Status().Status == "paused" })
+	done := r.Status().ImagesDone
+	time.Sleep(50 * time.Millisecond)
+	if r.Status().ImagesDone != done {
+		t.Fatal("made images while paused")
+	}
+	r.Resume()
+	d.gate <- struct{}{}
+	waitFor(t, func() bool { return r.Status().ImagesDone > done })
+	r.Stop()
+	close(d.gate)
+	r.Wait()
+	if s := r.Status(); s.StopReason != "stopped_by_user" {
+		t.Fatalf("got %+v", s)
+	}
+}
+
+func TestNeedsTwoSources(t *testing.T) {
+	r, src, _ := setup(t, 1)
+	r.Start(RunConfig{SourceDir: src, Target: 5}, Engine{Describer: &fakeDesc{}, ImageMaker: &fakeMaker{}, Load: fakeLoad})
+	r.Wait()
+	if s := r.Status(); s.StopReason != "not_enough_sources" {
+		t.Fatalf("got %+v", s)
+	}
+}
+
+func TestPairDeckOrderedNoSelf(t *testing.T) {
+	d := &pairDeck{items: []string{"a", "b", "c"}, rng: New(nil, nil).rng}
+	seen := map[[2]string]int{}
+	for i := 0; i < 6; i++ {
+		p := d.next()
+		if p[0] == p[1] {
+			t.Fatal("paired an image with itself")
+		}
+		seen[p]++
+	}
+	if len(seen) != 6 {
+		t.Fatalf("want all 6 ordered pairs once, got %v", seen)
+	}
+}
+
+func waitFor(t *testing.T, f func() bool) {
+	t.Helper()
+	for i := 0; i < 300; i++ {
+		if f() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out")
+}

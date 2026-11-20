@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Blendartai</title>
+<style>
+:root{--bg:#0d0f14;--panel:#151821;--panel2:#1b1f2a;--line:#272c39;--text:#e7e9f0;--muted:#8d95a7;--accent:#a78bfa;--accent2:#7c5cf0;--good:#4ade80;--bad:#f87171;--warn:#fbbf24;--r:12px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent)}
+button,input,select{font:inherit;color:var(--text)}
+button{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 14px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent2);border-color:var(--accent2);color:#fff}
+button.danger{background:transparent;border-color:#5a2a2a;color:var(--bad)}
+button:disabled{opacity:.5;cursor:default}
+input,select{background:#10131a;border:1px solid var(--line);border-radius:9px;padding:9px 11px;width:100%}
+input:focus,select:focus{outline:none;border-color:var(--accent)}
+label{display:block;color:var(--muted);font-size:12px;margin:12px 0 5px}
+.hidden{display:none!important}
+.center{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px}
+.auth{width:100%;max-width:380px}
+.brand{font-weight:700;font-size:18px;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
+.brand i{width:12px;height:12px;border-radius:4px;background:linear-gradient(135deg,var(--accent),#38bdf8);display:inline-block}
+.muted{color:var(--muted)}
+.err{color:var(--bad);min-height:20px;margin-top:10px;font-size:13px}
+.ok{color:var(--good)}
+header{position:sticky;top:0;z-index:20;background:rgba(13,15,20,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.bar{max-width:1300px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+nav{display:flex;gap:4px;flex-wrap:wrap;flex:1}
+nav button{background:transparent;border-color:transparent;color:var(--muted)}
+nav button.on{color:var(--text);background:var(--panel2);border-color:var(--line)}
+main{max-width:1300px;margin:0 auto;padding:18px 16px 60px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}
+.stat b{display:block;font-size:22px;margin-top:4px}
+.pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;border:1px solid var(--line)}
+.pill.running{color:var(--good);border-color:#24533a}.pill.stopping{color:var(--warn)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.row>*{flex:1}
+.row>button{flex:0 0 auto}
+.drop{border:1.5px dashed var(--line);border-radius:var(--r);padding:26px;text-align:center;color:var(--muted);cursor:pointer;margin-bottom:14px}
+.drop.over{border-color:var(--accent);color:var(--text)}
+.thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.thumb{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.thumb img{display:block;width:100%;aspect-ratio:1;object-fit:cover;cursor:zoom-in;background:#0a0c10}
+.thumb .cap{padding:6px 8px;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.thumb .x{position:absolute;top:6px;right:6px;padding:2px 8px;background:rgba(0,0,0,.6);border-color:transparent}
+.pair{margin:18px 0}
+.pair h4{margin:0 0 8px;font-weight:600;color:var(--muted);font-size:13px}
+.lb{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:50;display:flex;flex-direction:column}
+.lb .stage{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;padding:12px}
+.lb img{max-width:100%;max-height:100%;object-fit:contain}
+.lb .info{padding:12px 16px;background:var(--panel);border-top:1px solid var(--line)}
+.lb .prompt{max-height:90px;overflow:auto;color:var(--muted);font-size:13px;margin-bottom:10px}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:10px;z-index:60}
+.prov{margin-bottom:14px}
+.prov .head{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.prov .head b{flex:1}
+.models{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-top:10px}
+.model{display:flex;gap:8px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--line);font-size:13px}
+.model:last-child{border-bottom:0}
+.model span{flex:1;word-break:break-all}
+.model button{padding:4px 9px;font-size:12px}
+.model button.act{background:var(--accent2);border-color:var(--accent2);color:#fff}
+.pill.paused,.pill.pausing{color:var(--warn);border-color:#5a4a1a}
+code{background:#10131a;padding:2px 6px;border-radius:6px}
+@media(max-width:600px){.bar{gap:8px}.stat b{font-size:18px}}
+</style>
+</head>
+<body>
+
+<div id="v-auth" class="center hidden">
+  <div class="card auth">
+    <div class="brand"><i></i>Blendartai</div>
+    <div id="setup-box" class="hidden">
+      <p class="muted">Create your admin login. The setup code is shown by the installer and in <code>sudo blendartai</code>.</p>
+      <label>Setup code</label><input id="s-code" autocomplete="off" autocapitalize="characters">
+      <label>Username</label><input id="s-user" value="admin" autocomplete="username">
+      <label>Password (10+ characters)</label><input id="s-pass" type="password" autocomplete="new-password">
+      <div style="margin-top:16px"><button class="primary" id="s-go" style="width:100%">Create admin</button></div>
+    </div>
+    <div id="login-box" class="hidden">
+      <label>Username</label><input id="l-user" autocomplete="username">
+      <label>Password</label><input id="l-pass" type="password" autocomplete="current-password">
+      <div style="margin-top:16px"><button class="primary" id="l-go" style="width:100%">Log in</button></div>
+      <p class="muted" style="font-size:12px;margin-bottom:0">Forgot it? Reset from <code>sudo blendartai</code>.</p>
+    </div>
+    <div class="err" id="a-err"></div>
+  </div>
+</div>
+
+<div id="v-app" class="hidden">
+<header><div class="bar">
+  <div class="brand"><i></i>Blendartai</div>
+  <nav id="nav">
+    <button data-t="dash" class="on">Dashboard</button>
+    <button data-t="sources">Sources</button>
+    <button data-t="gallery">Gallery</button>
+    <button data-t="picked">Picked</button>
+    <button data-t="models">Models</button>
+    <button data-t="settings">Settings</button>
+  </nav>
+  <span class="muted" style="font-size:12px">v__VERSION__</span>
+  <button id="logout">Log out</button>
+</div></header>
+<main>
+
+<section id="t-dash">
+  <div class="stats">
+    <div class="stat"><span class="muted">Status</span><b id="d-status">idle</b></div>
+    <div class="stat"><span class="muted">Images</span><b id="d-images">0</b></div>
+    <div class="stat"><span class="muted">Descriptions</span><b id="d-desc">0</b></div>
+    <div class="stat"><span class="muted">Errors</span><b id="d-errs">0</b></div>
+    <div class="stat"><span class="muted">Est. spend</span><b id="d-spend">-</b></div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h3 style="margin-top:0">Run</h3>
+      <p class="muted" id="d-hint"></p>
+      <div class="row">
+        <div><label>Images to make</label><input id="d-target" type="number" min="1"></div>
+        <div><label>Max USD (0 = off)</label><input id="d-usd" type="number" min="0" step="0.01"></div>
+      </div>
+      <div class="row" style="margin-top:16px">
+        <button class="primary" id="d-start">Start</button>
+        <button id="d-pause">Pause</button>
+        <button class="danger" id="d-stop">Stop</button>
+      </div>
+      <div class="err" id="d-err"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Now</h3>
+      <div class="muted">Run: <span id="d-run">none</span></div>
+      <div class="muted">Working on: <span id="d-pair">-</span></div>
+      <div class="muted">Describe: <span id="d-dm">-</span></div>
+      <div class="muted">Image: <span id="d-im">-</span></div>
+      <div class="muted">Stop reason: <span id="d-reason">-</span></div>
+      <div class="muted" style="word-break:break-word">Last error: <span id="d-lasterr">-</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="t-sources" class="hidden">
+  <div class="drop" id="drop">Drop images here or tap to upload (PNG, JPEG, WebP, up to 20 MB each)<input id="file" type="file" accept="image/png,image/jpeg,image/webp" multiple class="hidden"></div>
+  <div class="muted" id="src-count" style="margin-bottom:10px"></div>
+  <div class="thumbs" id="src-grid"></div>
+</section>
+
+<section id="t-gallery" class="hidden">
+  <div class="row" style="margin-bottom:6px">
+    <select id="g-run"></select>
+    <button id="g-refresh">Refresh</button>
+    <button class="danger" id="g-del">Delete run</button>
+  </div>
+  <p class="muted" style="font-size:12px">Open an image, then K to keep, X to reject, arrows to move, Esc to close.</p>
+  <div id="g-body"></div>
+</section>
+
+<section id="t-picked" class="hidden">
+  <div class="row" style="margin-bottom:12px">
+    <span class="muted" id="p-count"></span>
+    <button class="primary" id="p-zip">Download all (zip)</button>
+  </div>
+  <div class="thumbs" id="p-grid"></div>
+</section>
+
+<section id="t-models" class="hidden">
+  <div class="grid2" style="margin-bottom:14px">
+    <div class="card"><span class="muted">Describe model (sees both images, writes the prompt)</span><b id="m-desc" style="display:block;margin-top:6px">not picked</b></div>
+    <div class="card"><span class="muted">Image model (draws the prompt)</span><b id="m-img" style="display:block;margin-top:6px">not picked</b></div>
+  </div>
+  <div class="card" style="margin-bottom:14px">
+    <h3 style="margin-top:0">Add a provider</h3>
+    <div class="row">
+      <div><label>Type</label><select id="n-kind"><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="anthropic">Anthropic</option><option value="custom">Custom (OpenAI-compatible)</option></select></div>
+      <div><label>Name</label><input id="n-name" placeholder="optional"></div>
+    </div>
+    <label>Base URL <span class="muted" id="n-urlhint"></span></label><input id="n-url">
+    <label>API key</label><input id="n-key" type="password" autocomplete="off">
+    <div style="margin-top:14px"><button class="primary" id="n-add">Check key and list models</button></div>
+    <div class="err" id="n-err"></div>
+  </div>
+  <div id="prov-list"></div>
+</section>
+
+<section id="t-settings" class="hidden">
+  <div class="grid2">
+    <div class="card">
+      <h3 style="margin-top:0">Run settings</h3>
+      <label>Describe instruction (sent with the two images: first = content, second = style)</label>
+      <textarea id="k-prompt" rows="9" style="width:100%;background:#10131a;border:1px solid var(--line);border-radius:9px;padding:9px 11px;color:var(--text);font:inherit;resize:vertical"></textarea>
+      <div style="margin-top:6px"><button id="k-prompt-reset">Restore default</button></div>
+      <div class="row">
+        <div><label>Image size (1K, 2K, 4K or 1024x1024)</label><input id="k-size"></div>
+        <div><label>Images per run</label><input id="k-target" type="number" min="1"></div>
+      </div>
+      <div class="row">
+        <div><label>Price per image, USD (for the estimate)</label><input id="k-price" type="number" step="0.0001" min="0"></div>
+        <div><label>Max USD per run (0 = off)</label><input id="k-usd" type="number" step="0.01" min="0"></div>
+      </div>
+      <label>Outbound proxy for AI calls (optional: http://, https:// or socks5://)</label><input id="k-proxy" placeholder="socks5://127.0.0.1:1080">
+      <div style="margin-top:16px"><button class="primary" id="k-save">Save</button></div>
+      <div class="err" id="k-err"></div>
+    </div>
+    <div>
+      <div class="card" style="margin-bottom:14px">
+        <h3 style="margin-top:0">API token</h3>
+        <p class="muted">For CorText or scripts: send it as <code>Authorization: Bearer …</code>. Shown once.</p>
+        <div id="t-state" class="muted"></div>
+        <input id="t-new" class="hidden" readonly>
+        <div class="row" style="margin-top:12px"><button id="t-gen">Generate new token</button><button class="danger" id="t-del">Remove</button></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Password</h3>
+        <label>Current password</label><input id="pw-old" type="password" autocomplete="current-password">
+        <label>New password (10+ characters)</label><input id="pw-new" type="password" autocomplete="new-password">
+        <div style="margin-top:16px"><button id="pw-go">Change password</button></div>
+        <div class="err" id="pw-err"></div>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+</div>
+
+<div id="lb" class="lb hidden">
+  <div class="stage"><img id="lb-img" alt=""></div>
+  <div class="info">
+    <div class="prompt" id="lb-prompt"></div>
+    <div class="row">
+      <span class="muted" id="lb-pos"></span>
+      <button id="lb-prev">‹</button><button id="lb-next">›</button>
+      <button class="primary" id="lb-keep">Keep (K)</button>
+      <button class="danger" id="lb-rej">Reject (X)</button>
+      <button id="lb-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = "__BASE_PATH__";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const enc = encodeURIComponent;
+
+async function api(path, opt = {}) {
+  opt.headers = Object.assign({"X-Blendartai": "1"}, opt.headers || {});
+  if (opt.json !== undefined) { opt.body = JSON.stringify(opt.json); opt.headers["Content-Type"] = "application/json"; }
+  opt.credentials = "same-origin";
+  const res = await fetch(BASE + path, opt);
+  let data = {};
+  try { data = await res.json(); } catch (_) {}
+  if (res.status === 401 && !path.startsWith("/api/login") && !path.startsWith("/api/setup")) { boot(); throw new Error("please log in"); }
+  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+function toast(msg) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 2200);
+}
+
+// ---------- auth ----------
+async function boot() {
+  let s;
+  try { s = await (await fetch(BASE + "/api/session", {credentials: "same-origin"})).json(); }
+  catch (e) { $("a-err").textContent = "Cannot reach the server."; show("auth"); return; }
+  if (s.logged_in) { show("app"); tab(location.hash.slice(1) || "dash"); return; }
+  show("auth");
+  $("setup-box").classList.toggle("hidden", s.admin_exists);
+  $("login-box").classList.toggle("hidden", !s.admin_exists);
+}
+function show(v) { $("v-auth").classList.toggle("hidden", v !== "auth"); $("v-app").classList.toggle("hidden", v !== "app"); }
+$("s-go").onclick = async () => {
+  $("a-err").textContent = "";
+  try { await api("/api/setup", {method: "POST", json: {code: $("s-code").value, username: $("s-user").value, password: $("s-pass").value}}); boot(); }
+  catch (e) { $("a-err").textContent = e.message; }
+};
+$("l-go").onclick = async () => {
+  $("a-err").textContent = "";
+  try { await api("/api/login", {method: "POST", json: {username: $("l-user").value, password: $("l-pass").value}}); $("l-pass").value = ""; boot(); }
+  catch (e) { $("a-err").textContent = e.message; }
+};
+["l-pass", "s-pass"].forEach(id => $(id).addEventListener("keydown", e => { if (e.key === "Enter") $(id === "l-pass" ? "l-go" : "s-go").click(); }));
+$("logout").onclick = async () => { try { await api("/api/logout", {method: "POST"}); } catch (_) {} boot(); };
+
+// ---------- tabs ----------
+let poll = null;
+function tab(t) {
+  if (!$("t-" + t)) t = "dash";
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.t === t));
+  document.querySelectorAll("main section").forEach(s => s.classList.toggle("hidden", s.id !== "t-" + t));
+  history.replaceState(null, "", "#" + t);
+  clearInterval(poll); poll = null;
+  if (t === "dash") { loadDash(); poll = setInterval(loadStatus, 2500); }
+  if (t === "sources") loadSources();
+  if (t === "gallery") loadRuns();
+  if (t === "picked") loadPicked();
+  if (t === "settings") loadSettings();
+  if (t === "models") loadModels();
+}
+document.querySelectorAll("#nav button").forEach(b => b.onclick = () => tab(b.dataset.t));
+
+// ---------- dashboard ----------
+let lastSet = null;
+const refLabel = (set, ref) => { if (!ref || !ref.provider_id) return "not picked"; const p = set.providers.find(x => x.id === ref.provider_id); return (p ? p.name : "?") + " / " + ref.model; };
+async function loadDash() {
+  try { const s = await api("/api/settings"); lastSet = s; $("d-target").value = s.target_images; $("d-usd").value = s.max_usd;
+    const ready = s.describe_model.provider_id && s.image_model.provider_id;
+    $("d-hint").textContent = ready ? "Each step: two random sources, " + refLabel(s, s.describe_model) + " writes the first in the style of the second, then " + refLabel(s, s.image_model) + " draws it." : "Pick a describe model and an image model in Models first.";
+  } catch (_) {}
+  loadStatus();
+}
+async function loadStatus() {
+  let s; try { s = await api("/api/status"); } catch (_) { return; }
+  $("d-status").innerHTML = '<span class="pill ' + esc(s.status) + '">' + esc(s.status) + "</span>";
+  $("d-images").textContent = s.images_done + (s.max_images ? " / " + s.max_images : "");
+  $("d-desc").textContent = s.descriptions || 0;
+  $("d-errs").textContent = s.errors || 0;
+  $("d-spend").textContent = s.est_spend_usd ? "$" + s.est_spend_usd.toFixed(2) + (s.max_usd ? " / $" + s.max_usd.toFixed(2) : "") : "-";
+  $("d-run").textContent = s.run_id || "none";
+  $("d-pair").textContent = s.current_pair || "-";
+  $("d-dm").textContent = s.describe_model || "-";
+  $("d-im").textContent = s.image_model || "-";
+  $("d-reason").textContent = (s.stop_reason || "-").replaceAll("_", " ");
+  $("d-lasterr").textContent = s.last_error || "-";
+  const live = ["running", "pausing", "paused", "stopping"].includes(s.status);
+  $("d-start").disabled = live; $("d-stop").disabled = !live || s.status === "stopping";
+  $("d-pause").disabled = !live || s.status === "stopping";
+  $("d-pause").textContent = (s.status === "paused" || s.status === "pausing") ? "Resume" : "Pause";
+}
+$("d-start").onclick = async () => {
+  $("d-err").textContent = "";
+  try { await api("/api/run", {method: "POST", json: {target_images: +$("d-target").value || 0, max_usd: +$("d-usd").value || 0}}); toast("Run started"); loadStatus(); }
+  catch (e) { $("d-err").textContent = e.message; }
+};
+$("d-pause").onclick = async () => {
+  const resume = $("d-pause").textContent === "Resume";
+  try { await api(resume ? "/api/resume" : "/api/pause", {method: "POST"}); toast(resume ? "Resumed" : "Pausing after the current image"); loadStatus(); } catch (e) { $("d-err").textContent = e.message; }
+};
+$("d-stop").onclick = async () => { if (!confirm("Stop this run? Images made so far are kept.")) return; try { await api("/api/stop", {method: "POST"}); toast("Stopping after the current image"); loadStatus(); } catch (e) { $("d-err").textContent = e.message; } };
+
+// ---------- sources ----------
+async function loadSources() {
+  const d = await api("/api/sources");
+  $("src-count").textContent = d.files.length + " source images" + (d.files.length < 2 ? " (need at least 2)" : "");
+  $("src-grid").innerHTML = d.files.map(f => {
+    const u = BASE + "/api/sources/file?name=" + enc(f.name);
+    return '<div class="thumb"><img loading="lazy" src="' + u + '" data-full="' + u + '"><div class="cap">' + esc(f.name) + '</div><button class="x" data-del="' + esc(f.name) + '">✕</button></div>';
+  }).join("");
+}
+$("src-grid").onclick = async e => {
+  const n = e.target.dataset.del; if (n) { if (!confirm("Delete " + n + "?")) return; await api("/api/sources?name=" + enc(n), {method: "DELETE"}); loadSources(); return; }
+  if (e.target.dataset.full) window.open(e.target.dataset.full, "_blank");
+};
+async function upload(files) {
+  if (!files.length) return;
+  const fd = new FormData(); [...files].forEach(f => fd.append("files", f, f.name));
+  $("drop").textContent = "Uploading " + files.length + "…";
+  try { const r = await api("/api/sources", {method: "POST", body: fd}); toast(r.saved.length + " uploaded" + (r.errors.length ? ", " + r.errors.length + " failed" : "")); if (r.errors.length) alert(r.errors.join("\n")); }
+  catch (e) { alert(e.message); }
+  resetDrop(); loadSources();
+}
+function resetDrop() {
+  $("drop").innerHTML = 'Drop images here or tap to upload (PNG, JPEG, WebP, up to 20 MB each)<input id="file" type="file" accept="image/png,image/jpeg,image/webp" multiple class="hidden">';
+  $("file").onchange = e => upload(e.target.files);
+}
+resetDrop();
+$("drop").onclick = e => { if (e.target.id !== "file") $("file").click(); };
+$("drop").ondragover = e => { e.preventDefault(); $("drop").classList.add("over"); };
+$("drop").ondragleave = () => $("drop").classList.remove("over");
+$("drop").ondrop = e => { e.preventDefault(); $("drop").classList.remove("over"); upload(e.dataTransfer.files); };
+
+// ---------- gallery ----------
+let runs = [], flat = [], cur = -1;
+async function loadRuns(keep) {
+  const d = await api("/api/runs"); runs = d.runs;
+  const sel = $("g-run"), prev = keep ? sel.value : "";
+  sel.innerHTML = runs.length ? runs.map(r => '<option value="' + esc(r.run_id) + '">' + esc(r.run_id) + " · " + r.pairs.reduce((n, p) => n + p.images.length, 0) + " images" + (r.state.status === "running" ? " · running" : "") + "</option>").join("") : "<option value=''>No runs yet</option>";
+  if (prev && runs.some(r => r.run_id === prev)) sel.value = prev;
+  renderRun();
+}
+function renderRun() {
+  const r = runs.find(x => x.run_id === $("g-run").value);
+  flat = [];
+  if (!r) { $("g-body").innerHTML = '<p class="muted">Nothing here yet. Start a run from the Dashboard.</p>'; return; }
+  $("g-body").innerHTML = r.pairs.map(p => '<div class="pair"><h4>' + esc(p.name) + '</h4><div class="thumbs">' + p.images.map(im => {
+    const i = flat.push({run: r.run_id, path: im.path, prompt: im.prompt}) - 1;
+    return '<div class="thumb"><img loading="lazy" title="' + esc(im.prompt) + '" src="' + imgURL(r.run_id, im.path) + '" data-i="' + i + '"><div class="cap">' + esc(im.name) + "</div></div>";
+  }).join("") + "</div></div>").join("") || '<p class="muted">No images in this run yet.</p>';
+}
+const imgURL = (run, path) => BASE + "/api/image?run=" + enc(run) + "&path=" + enc(path);
+$("g-run").onchange = renderRun;
+$("g-refresh").onclick = () => loadRuns(true);
+$("g-del").onclick = async () => { const id = $("g-run").value; if (!id || !confirm("Delete run " + id + " and all its images?")) return;
+  try { await api("/api/runs?run=" + enc(id), {method: "DELETE"}); loadRuns(); } catch (e) { alert(e.message); } };
+$("g-body").onclick = e => { if (e.target.dataset.i !== undefined) openLB(+e.target.dataset.i); };
+
+function openLB(i) {
+  if (i < 0 || i >= flat.length) return; cur = i; const it = flat[i];
+  $("lb-img").src = imgURL(it.run, it.path); $("lb-prompt").textContent = it.prompt || "";
+  $("lb-pos").textContent = (i + 1) + " / " + flat.length; $("lb").classList.remove("hidden");
+}
+function closeLB() { $("lb").classList.add("hidden"); cur = -1; }
+async function act(kind) {
+  if (cur < 0) return; const it = flat[cur];
+  try { await api("/api/" + kind, {method: "POST", json: {run: it.run, path: it.path}}); toast(kind === "pick" ? "Kept" : "Rejected"); }
+  catch (e) { toast(e.message); return; }
+  if (kind === "reject") { flat.splice(cur, 1); if (!flat.length) { closeLB(); loadRuns(true); return; } openLB(Math.min(cur, flat.length - 1)); }
+  else openLB(Math.min(cur + 1, flat.length - 1));
+}
+$("lb-keep").onclick = () => act("pick"); $("lb-rej").onclick = () => act("reject");
+$("lb-prev").onclick = () => openLB(cur - 1); $("lb-next").onclick = () => openLB(cur + 1);
+$("lb-close").onclick = () => { closeLB(); loadRuns(true); };
+document.addEventListener("keydown", e => {
+  if (cur < 0) return;
+  if (e.key === "k" || e.key === "K") act("pick");
+  else if (e.key === "x" || e.key === "X") act("reject");
+  else if (e.key === "ArrowRight") openLB(cur + 1);
+  else if (e.key === "ArrowLeft") openLB(cur - 1);
+  else if (e.key === "Escape") { closeLB(); loadRuns(true); }
+});
+
+// ---------- picked ----------
+async function loadPicked() {
+  const d = await api("/api/picked");
+  $("p-count").textContent = d.files.length + " kept images";
+  $("p-zip").disabled = !d.files.length;
+  $("p-grid").innerHTML = d.files.map(f => {
+    const u = BASE + "/api/picked/file?name=" + enc(f.name);
+    return '<div class="thumb"><a href="' + u + '&download=1"><img loading="lazy" src="' + u + '"></a><div class="cap">' + esc(f.name) + '</div><button class="x" data-del="' + esc(f.name) + '">✕</button></div>';
+  }).join("");
+}
+$("p-grid").onclick = async e => { const n = e.target.dataset.del; if (!n || !confirm("Remove from picked?")) return; await api("/api/picked?name=" + enc(n), {method: "DELETE"}); loadPicked(); };
+$("p-zip").onclick = () => { location.href = BASE + "/api/picked/zip"; };
+
+// ---------- models ----------
+let urlDefaults = {}, filters = {};
+function renderModels(s) {
+  lastSet = s; urlDefaults = s.default_urls || {};
+  $("m-desc").textContent = refLabel(s, s.describe_model); $("m-img").textContent = refLabel(s, s.image_model);
+  $("prov-list").innerHTML = s.providers.length ? s.providers.map(p => {
+    const f = (filters[p.id] || "").toLowerCase();
+    const models = p.models.filter(m => !f || m.toLowerCase().includes(f));
+    const isD = m => s.describe_model.provider_id === p.id && s.describe_model.model === m;
+    const isI = m => s.image_model.provider_id === p.id && s.image_model.model === m;
+    return '<div class="card prov"><div class="head"><b>' + esc(p.name) + ' <span class="muted" style="font-weight:400">· ' + esc(p.kind) + " · key …" + esc(p.key_last4) + "</span></b>" +
+      '<button data-check="' + p.id + '">Check again</button><button data-editkey="' + p.id + '">Change key</button><button class="danger" data-delp="' + p.id + '">Remove</button></div>' +
+      (p.base_url ? '<div class="muted" style="font-size:12px">' + esc(p.base_url) + "</div>" : "") +
+      (p.check_error ? '<div class="err">Check failed: ' + esc(p.check_error) + "</div>" : '<div class="ok" style="font-size:12px;margin-top:4px">Key works · ' + p.models.length + " models</div>") +
+      '<div class="row" style="margin-top:10px"><input placeholder="Filter models" data-filter="' + p.id + '" value="' + esc(filters[p.id] || "") + '"><input placeholder="Or type a model name" data-manual="' + p.id + '"><button data-manualgo="' + p.id + '">Use typed</button></div>' +
+      '<div class="models">' + (models.map(m => '<div class="model"><span>' + esc(m) + '</span><button class="' + (isD(m) ? "act" : "") + '" data-role="describe" data-p="' + p.id + '" data-m="' + esc(m) + '">' + (isD(m) ? "✓ Describe" : "Describe") + "</button>" +
+        (p.can_images ? '<button class="' + (isI(m) ? "act" : "") + '" data-role="image" data-p="' + p.id + '" data-m="' + esc(m) + '">' + (isI(m) ? "✓ Image" : "Image") + "</button>" : "") + "</div>").join("") || '<div class="model muted">No models</div>') + "</div></div>";
+  }).join("") : '<p class="muted">No providers yet. Add one above.</p>';
+}
+async function loadModels() { renderModels(await api("/api/settings")); syncURL(); }
+function syncURL() { const k = $("n-kind").value; $("n-url").placeholder = urlDefaults[k] || "https://your-host/v1"; $("n-urlhint").textContent = k === "custom" ? "(required)" : "(leave empty for the official API, or set a relay)"; }
+$("n-kind").onchange = syncURL;
+$("n-add").onclick = async () => {
+  $("n-err").textContent = ""; $("n-add").disabled = true; $("n-add").textContent = "Checking…";
+  try { const s = await api("/api/providers", {method: "POST", json: {kind: $("n-kind").value, name: $("n-name").value, base_url: $("n-url").value, api_key: $("n-key").value}});
+    $("n-key").value = $("n-name").value = $("n-url").value = ""; renderModels(s); toast("Provider added"); }
+  catch (e) { $("n-err").textContent = e.message; }
+  $("n-add").disabled = false; $("n-add").textContent = "Check key and list models";
+};
+$("prov-list").addEventListener("input", e => { const id = e.target.dataset.filter; if (!id) return; filters[id] = e.target.value; const pos = e.target.selectionStart; renderModels(lastSet); const el = document.querySelector('[data-filter="' + id + '"]'); el.focus(); el.setSelectionRange(pos, pos); });
+$("prov-list").onclick = async e => {
+  const d = e.target.dataset;
+  try {
+    if (d.role) renderModels(await api("/api/active", {method: "PUT", json: {role: d.role, provider_id: d.p, model: d.m}}));
+    else if (d.manualgo) { const m = document.querySelector('[data-manual="' + d.manualgo + '"]').value.trim(); if (!m) return;
+      const role = confirm("Use " + m + " as the IMAGE model? (Cancel = describe model)") ? "image" : "describe";
+      renderModels(await api("/api/active", {method: "PUT", json: {role, provider_id: d.manualgo, model: m}})); }
+    else if (d.check) { e.target.textContent = "Checking…"; renderModels(await api("/api/providers/check?id=" + enc(d.check), {method: "POST"})); }
+    else if (d.editkey) { const k = prompt("New API key"); if (!k) return; const p = lastSet.providers.find(x => x.id === d.editkey);
+      renderModels(await api("/api/providers?id=" + enc(d.editkey), {method: "PUT", json: {name: p.name, base_url: p.base_url, api_key: k}})); }
+    else if (d.delp) { if (!confirm("Remove this provider and its key?")) return; renderModels(await api("/api/providers?id=" + enc(d.delp), {method: "DELETE"})); }
+  } catch (err) { alert(err.message); loadModels(); }
+};
+
+// ---------- settings ----------
+async function loadSettings() {
+  const s = await api("/api/settings"); lastSet = s;
+  $("k-prompt").value = s.describe_prompt; $("k-size").value = s.image_size; $("k-target").value = s.target_images;
+  $("k-price").value = s.price_per_image; $("k-usd").value = s.max_usd; $("k-proxy").value = s.proxy_url || "";
+  $("t-state").textContent = s.api_token_set ? "A token is active." : "No token yet."; $("t-new").classList.add("hidden");
+}
+$("k-prompt-reset").onclick = () => { if (lastSet) $("k-prompt").value = lastSet.default_prompt; };
+$("k-save").onclick = async () => {
+  $("k-err").textContent = "";
+  try { await api("/api/settings", {method: "PUT", json: {describe_prompt: $("k-prompt").value, image_size: $("k-size").value, target_images: +$("k-target").value,
+    price_per_image: +$("k-price").value, max_usd: +$("k-usd").value, proxy_url: $("k-proxy").value}}); toast("Saved"); loadSettings(); }
+  catch (e) { $("k-err").textContent = e.message; }
+};
+$("t-gen").onclick = async () => { if (!confirm("Make a new token? The old one stops working.")) return;
+  const d = await api("/api/settings/token", {method: "POST"}); $("t-new").value = d.token; $("t-new").classList.remove("hidden"); $("t-new").select();
+  $("t-state").textContent = "Copy it now, it won't be shown again."; };
+$("t-del").onclick = async () => { if (!confirm("Remove the API token?")) return; await api("/api/settings/token", {method: "DELETE"}); loadSettings(); };
+$("pw-go").onclick = async () => { $("pw-err").textContent = "";
+  try { await api("/api/password", {method: "POST", json: {old: $("pw-old").value, new: $("pw-new").value}}); $("pw-old").value = $("pw-new").value = ""; toast("Password changed, other devices logged out"); }
+  catch (e) { $("pw-err").textContent = e.message; } };
+
+boot();
+</script>
+</body>
+</html>
