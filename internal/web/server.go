@@ -19,7 +19,7 @@ import (
 	"github.com/sahand363/blendartai/internal/store"
 )
 
-//go:embed app.html
+//go:embed app.html favicon.ico favicon-32.png apple-touch-icon.png
 var assets embed.FS
 
 const (
@@ -60,6 +60,19 @@ func New(opt Options, a *auth.Store, set *config.SettingsStore, r *runner.Runner
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleApp)
+	for name, ctype := range map[string]string{"favicon.ico": "image/x-icon", "favicon-32.png": "image/png", "apple-touch-icon.png": "image/png"} {
+		name, ctype := name, ctype
+		mux.HandleFunc("GET /"+name, func(w http.ResponseWriter, r *http.Request) {
+			b, err := assets.ReadFile(name)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", ctype)
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+			_, _ = w.Write(b)
+		})
+	}
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.opt.Version})
 	})

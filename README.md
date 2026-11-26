@@ -1,5 +1,7 @@
 # Blendartai
 
+<p align="center"><img src="docs/icon.png" width="120"></p>
+
 A self-hosted image mixer with a web panel. Drop in your images; Blendartai keeps picking two at random, has one AI model describe the **first image in the style of the second**, saves that description, has a second AI model draw it, and repeats until it has made the number of images you asked for (100 by default). Pause, resume or stop at any time to look at the results.
 
 ## Install
